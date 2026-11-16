@@ -416,7 +416,7 @@ class CommandBuilder:
         args = ["-c:a", codec.id]
 
         if not codec.lossless:
-            if settings.mode == "vbr" and codec.quality:
+            if settings.mode == "vbr" and codec.vbr:
                 quality = to_int(settings.quality)
                 if quality is None:
                     quality = codec.default_quality

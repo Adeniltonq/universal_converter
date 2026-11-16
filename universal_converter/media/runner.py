@@ -67,8 +67,10 @@ class JobRunner:
             os.makedirs(folder, exist_ok=True)
         except OSError as exc:
             return RunOutcome(False, message=f"Não foi possível criar a pasta de saída: {exc}")
-        if temp_path in args:
-            args = [temp_path if a == final_path else a for a in args]
+        # troca o caminho final pelo temporário (compara caminhos normalizados)
+        final_key = os.path.normcase(os.path.abspath(final_path))
+        args = [temp_path if os.path.normcase(os.path.abspath(a)) == final_key else a
+                for a in args]
         if os.path.exists(temp_path):
             try:
                 os.remove(temp_path)
@@ -86,7 +88,7 @@ class JobRunner:
         try:
             proc = subprocess.Popen(
                 args, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE, bufsize=1, **popen_kwargs)
+                stderr=subprocess.PIPE, **popen_kwargs)
         except FileNotFoundError:
             return RunOutcome(False, message="FFmpeg não encontrado.")
         except OSError as exc:
