@@ -54,10 +54,61 @@ class CodecCatalog:
         self._audio_cache: dict[tuple, list[AudioOption]] = {}
         self._video_cache: dict[tuple, list[VideoOption]] = {}
 
-    # ------------------------------------------------------------------
     @property
     def ready(self) -> bool:
         return self.ff.loaded and not self.ff.error
+
+    # -- padrões --------------------------------------------------------
+    def default_audio_codec(self, container_key: str) -> str:
+        """Encoder de áudio preferido para o contêiner (o "óbvio" para o usuário)."""
+        preferences = {
+            "mp3": ("libmp3lame",),
+            "m4a": ("aac", "libfdk_aac", "alac"),
+            "adts": ("aac", "libfdk_aac"),
+            "flac": ("flac",),
+            "ogg": ("libvorbis", "libopus", "flac"),
+            "opus": ("libopus",),
+            "wav": ("pcm_s16le", "pcm_s24le", "pcm_f32le"),
+            "aiff": ("pcm_s16be", "pcm_s24be"),
+            "caf": ("alac", "pcm_s16le"),
+            "wma": ("wmav2", "wmav1"),
+            "ac3": ("ac3",),
+            "eac3": ("eac3",),
+            "dts": ("dca",),
+            "amr": ("libopencore_amrnb", "libvo_amrwbenc"),
+        }
+        available = self.audio_encoders()
+        for candidate in preferences.get(container_key, ()):
+            if candidate in available:
+                return candidate
+        container = CONTAINERS.get(container_key)
+        if container:
+            for codec_id in container.audio_codecs:
+                if codec_id in AUDIO_CODECS and codec_id in available:
+                    return codec_id
+        return "libmp3lame"
+
+    def default_video_codec(self, container_key: str) -> str:
+        preferences = {
+            "mp4": ("libx264", "h264_nvenc", "libopenh264", "mpeg4", "copy"),
+            "mkv": ("libx264", "copy"),
+            "mov": ("libx264", "h264_videotoolbox", "mpeg4", "copy"),
+            "webm": ("libvpx-vp9", "copy"),
+            "avi": ("mpeg4", "copy"),
+            "mpeg": ("mpeg2video", "copy"),
+            "ts": ("libx264", "copy"),
+            "flv": ("libx264", "copy"),
+            "wmv": ("wmv2", "copy"),
+            "3gp": ("h263", "mpeg4", "copy"),
+            "ogv": ("libtheora", "copy"),
+        }
+        available = self.video_encoders()
+        for candidate in preferences.get(container_key, ("copy",)):
+            if candidate == "copy" or candidate in available:
+                return candidate
+        options = [o.id for o in self.video_options(container_key) if not o.is_copy
+                   and o.id != CODEC_NONE]
+        return options[0] if options else CODEC_COPY
 
     def audio_encoders(self) -> set[str]:
         return self.ff.audio_encoders()
@@ -112,18 +163,13 @@ class CodecCatalog:
         options: list[AudioOption] = [AudioOption(CODEC_COPY, "Copiar sem recodificar", None,
                                                   True)]
         native_required = container.requires_native_aac and "aac" in available
-        ids: list[str] = []
-        for codec_id in AUDIO_CODEC_ORDER:
-            if codec_id not in AUDIO_CODECS or codec_id in ids:
-                continue
-            if codec_id not in available:
-                continue
-            if native_required and codec_id == "libfdk_aac":
-                continue
-            if not self._container_audio_ok(container, codec_id):
-                continue
-            ids.append(codec_id)
-        ids.sort(key=lambda i: (i != "libmp3lame", i))
+        ids: list[str] = [
+            codec_id for codec_id in container.audio_codecs
+            if codec_id in AUDIO_CODECS and codec_id in available
+            and not (native_required and codec_id == "libfdk_aac")
+            and self._container_audio_ok(container, codec_id)]
+        preferred = self.default_audio_codec(container_key)
+        ids.sort(key=lambda i: (i != preferred,))
         for codec_id in ids:
             info = AUDIO_CODECS[codec_id]
             label = info.label

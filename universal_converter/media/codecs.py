@@ -51,8 +51,9 @@ def min_bitrate(channels: str | int, codec_id: str) -> int:
 
 AUDIO_CODEC_ORDER = [
     "libmp3lame", "aac", "libfdk_aac", "libopus", "libvorbis", "flac", "alac",
-    "pcm_s16le", "pcm_s24le", "pcm_s32le", "pcm_f32le", "wmav2", "ac3", "eac3",
-    "dca", "libopencore_amrnb", "libopencore_amrwb", "libvo_amrwbenc",
+    "pcm_s16le", "pcm_s24le", "pcm_s32le", "pcm_f32le", "pcm_s16be", "pcm_s24be",
+    "pcm_f32be", "pcm_s32be", "wmav2", "ac3", "eac3", "dca", "libopencore_amrnb",
+    "libopencore_amrwb", "libvo_amrwbenc",
 ]
 
 
@@ -71,6 +72,7 @@ class AudioCodec:
     max_channels: int = 8
     max_sample_rate: int = 192000
     max_bitrate: int = 640_000
+    big_endian: bool = False
 
 
 AUDIO_CODECS: dict[str, AudioCodec] = {
@@ -101,6 +103,15 @@ AUDIO_CODECS: dict[str, AudioCodec] = {
     "pcm_s32le": AudioCodec("pcm_s32le", "PCM 32 bits", "pcm_s32le", lossless=True),
     "pcm_f32le": AudioCodec("pcm_f32le", "PCM float 32 bits", "pcm_f32le",
                             lossless=True),
+    # big-endian (AIFF/CAF)
+    "pcm_s16be": AudioCodec("pcm_s16be", "PCM 16 bits (BE)", "pcm_s16be",
+                            lossless=True, big_endian=True),
+    "pcm_s24be": AudioCodec("pcm_s24be", "PCM 24 bits (BE)", "pcm_s24be",
+                            lossless=True, big_endian=True),
+    "pcm_f32be": AudioCodec("pcm_f32be", "PCM float 32 bits (BE)", "pcm_f32be",
+                            lossless=True, big_endian=True),
+    "pcm_s32be": AudioCodec("pcm_s32be", "PCM 32 bits (BE)", "pcm_s32be",
+                            lossless=True, big_endian=True),
     "wmav2": AudioCodec(
         "wmav2", "WMA v2", "wma", bitrates=(64, 96, 128, 160, 192, 256, 320),
         max_channels=2),
@@ -335,7 +346,7 @@ CONTAINERS: dict[str, Container] = {
                      audio_codecs=("pcm_s16le", "pcm_s24le", "pcm_s32le",
                                    "pcm_f32le"), kind="audio", cover=False),
     "aiff": Container("aiff", "AIFF", "aiff", ("aiff", "aif"), (),
-                      audio_codecs=("pcm_s16be", "pcm_s24be", "pcm_f32be"),
+                      audio_codecs=("pcm_s16be", "pcm_s24be", "pcm_s32be", "pcm_f32be"),
                       kind="audio", cover=False),
     "caf": Container("caf", "CAF (Apple)", "caf", ("caf",), (),
                      audio_codecs=("pcm_s16le", "pcm_s24le", "alac"), kind="audio"),
