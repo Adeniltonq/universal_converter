@@ -60,7 +60,8 @@ class JobRunner:
     def run(self, args: list[str], final_path: str, duration: float | None,
             on_progress: Callable[[float, float], None] | None = None,
             cancel_event: threading.Event | None = None,
-            overwrite: bool = True) -> RunOutcome:
+            overwrite: bool = True,
+            process_holder: dict | None = None) -> RunOutcome:
         temp_path = temporary_path(final_path)
         folder = os.path.dirname(final_path)
         try:
@@ -94,6 +95,10 @@ class JobRunner:
         except OSError as exc:
             return RunOutcome(False, message=f"Falha ao iniciar o FFmpeg: {exc}")
 
+        if process_holder is not None:
+            # permite pausar (SIGSTOP/SIGCONT) a partir do orquestrador
+            process_holder["proc"] = proc
+
         stderr_lines: list[str] = []
 
         def read_stderr() -> None:
@@ -126,7 +131,6 @@ class JobRunner:
                     break
                 line = raw.decode("utf-8", "replace").strip()
                 if line.startswith("out_time_us=") or line.startswith("out_time_ms="):
-                    self._update_time(line, duration, stderr_lines)
                     value = line.split("=", 1)[1]
                     try:
                         micro = int(value)
@@ -188,10 +192,6 @@ class JobRunner:
         return RunOutcome(True, message="Concluído", output_path=final_path,
                           duration=out_time, speed=speed,
                           stderr_tail="\n".join(stderr_lines))
-
-    @staticmethod
-    def _update_time(line: str, duration: float | None, _buffer: list[str]) -> None:
-        return
 
     @staticmethod
     def _terminate(proc: subprocess.Popen) -> None:

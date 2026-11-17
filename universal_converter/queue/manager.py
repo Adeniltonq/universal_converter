@@ -30,6 +30,40 @@ from .store import JobStore
 
 log = get_logger("queue")
 
+def _suspend(proc) -> None:
+    """Suspende o processo do FFmpeg (pausa real, sem perder trabalho)."""
+    try:
+        if os.name == "nt":
+            import ctypes
+            ntdll = ctypes.windll.ntdll
+            handle = ctypes.windll.kernel32.OpenProcess(0x0800, False, proc.pid)
+            if handle:
+                ntdll.NtSuspendProcess(handle)
+                ctypes.windll.kernel32.CloseHandle(handle)
+        else:
+            import signal
+            os.kill(proc.pid, signal.SIGSTOP)
+    except OSError:
+        pass
+
+
+def _resume(proc) -> None:
+    """Retoma um processo suspenso por `_suspend`."""
+    try:
+        if os.name == "nt":
+            import ctypes
+            ntdll = ctypes.windll.ntdll
+            handle = ctypes.windll.kernel32.OpenProcess(0x0800, False, proc.pid)
+            if handle:
+                ntdll.NtResumeProcess(handle)
+                ctypes.windll.kernel32.CloseHandle(handle)
+        else:
+            import signal
+            os.kill(proc.pid, signal.SIGCONT)
+    except OSError:
+        pass
+
+
 STATUS_LABEL = {
     "pending": "Aguardando",
     "analyzing": "Analisando",
@@ -483,6 +517,29 @@ class QueueManager:
 
     def _run_job(self, job: ConversionJob, planned_path: str,
                  cancel_event: threading.Event, threads: int, weight: int) -> None:
+        proc_holder: dict = {}
+        gate = threading.Event()
+
+        def gate_worker() -> None:
+            while not gate.is_set():
+                if self._paused and not cancel_event.is_set() and not self._stop_requested:
+                    holder = proc_holder.get("proc")
+                    if holder is not None and holder.poll() is None:
+                        # pausa real: suspende o processo do FFmpeg
+                        _suspend(holder)
+                        resumed = False
+                        while self._paused and not cancel_event.is_set() and \
+                                not self._stop_requested:
+                            time.sleep(0.1)
+                        _resume(holder)
+                    while self._paused and not cancel_event.is_set() and \
+                            not self._stop_requested:
+                        time.sleep(0.1)
+                time.sleep(0.1)
+
+        gate_thread = threading.Thread(target=gate_worker, daemon=True,
+                                       name=f"gate-{job.id}")
+        gate_thread.start()
         try:
             while self._paused and not cancel_event.is_set() and not self._stop_requested:
                 time.sleep(0.2)
@@ -518,7 +575,8 @@ class QueueManager:
 
             outcome = runner.run(build.args, final_path, duration,
                                  on_progress=on_progress, cancel_event=cancel_event,
-                                 overwrite=self.settings.overwrite)
+                                 overwrite=self.settings.overwrite,
+                                 process_holder=proc_holder)
             if outcome.cancelled:
                 self._mark(job, "cancelled", "Cancelado")
             elif outcome.success:
@@ -536,6 +594,7 @@ class QueueManager:
             log.exception("Erro inesperado na tarefa %s", job.file)
             self._mark(job, "error", f"Erro inesperado: {exc}")
         finally:
+            gate.set()
             with self._lock:
                 self._active_weights = max(0, self._active_weights - weight)
                 self._cancel_events.pop(job.id, None)
