@@ -180,11 +180,13 @@ class NamingEngine:
         if not values.get("tag"):
             # "{name}_{tag}" sem palavra adicional não deve gerar "Isolation_"
             tag_separator = re.escape(separator)
-            base_template = re.sub(rf"{tag_separator}\s*\{{tag\}}", "", base_template)
-            base_template = re.sub(rf"\{{tag\}}\s*{tag_separator}", "", base_template)
+            base_template = re.sub(rf"({tag_separator})\s*\{{tag\}}", r"\1", base_template)
+            base_template = re.sub(rf"\{{tag\}}\s*({tag_separator})", r"\1", base_template)
         raw = base_template or "{name}"
         rendered = _SAFE_VARIABLE.sub(
             lambda m: values.get(m.group(1).lower(), ""), raw)
+
+        rendered = _trim_empty_slots(rendered, separator)
 
         if model.replacement_from:
             try:
@@ -273,6 +275,21 @@ def _next_suffix(root: str) -> int:
     """Continua a numeração de um nome tipo "Album (3) - Faixa"."""
     match = re.search(r"\((\d+)\)", root)
     return int(match.group(1)) + 1 if match else 1
+
+
+def _trim_empty_slots(text: str, separator: str) -> str:
+    """Remove separadores duplicados/sobrando que resultam de variáveis vazias."""
+    if not separator:
+        return text
+    sep = re.escape(separator)
+    previous = None
+    while previous != text:
+        previous = text
+        text = re.sub(rf"(\s*{sep}\s*){{2,}}", separator, text)
+        text = re.sub(rf"^\s*{sep}\s*", "", text)
+        text = re.sub(rf"\s*{sep}\s*(?=\.)", "", text)
+        text = re.sub(rf"\s*{sep}\s*$", "", text)
+    return text
 
 
 def _clean_spaces(text: str) -> str:
