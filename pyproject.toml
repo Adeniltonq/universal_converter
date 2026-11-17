@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "universal-converter"
+version = "1.0.0"
+description = "Conversor de áudio e vídeo em lote com interface Tkinter e motor FFmpeg"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "Adenilton" }]
+keywords = ["audio", "video", "converter", "ffmpeg", "tkinter", "batch"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Environment :: X11 Applications",
+    "Operating System :: OS Independent",
+    "Topic :: Multimedia :: Sound/Audio :: Conversion",
+    "Topic :: Multimedia :: Video :: Conversion",
+]
+# Sem dependências obrigatórias: só a biblioteca padrão do Python.
+# Opcional: "psutil" melhora o monitoramento de CPU/RAM.
+dependencies = []
+
+[project.optional-dependencies]
+monitor = ["psutil"]
+build = ["pyinstaller"]
+
+[project.scripts]
+universal-converter = "universal_converter.__main__:main"
+
+[tool.setuptools]
+packages = [
+    "universal_converter",
+    "universal_converter.core",
+    "universal_converter.media",
+    "universal_converter.queue",
+    "universal_converter.filesystem",
+    "universal_converter.naming",
+    "universal_converter.profiles",
+    "universal_converter.ui",
+]

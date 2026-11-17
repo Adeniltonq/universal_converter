@@ -31,6 +31,7 @@ class MainWindow(tk.Tk):
 
         self.title(f"{APP_NAME} {__version__}")
         self.minsize(1040, 680)
+        self._set_icon()
         theme.apply_theme(self)
         try:
             self.tk.call("tk", "scaling", 1.25 if os.name == "nt" else 1.15)
@@ -58,6 +59,18 @@ class MainWindow(tk.Tk):
         self.performance_panel.fit_to_screen()
 
     # ------------------------------------------------------------------
+    def _set_icon(self) -> None:
+        """Aplica o ícone do programa (PNG funciona em Linux/Windows/macOS)."""
+        base = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        icon = os.path.join(base, "resources", "icon.png")
+        if not os.path.isfile(icon):
+            return
+        try:
+            self._icon_image = tk.PhotoImage(file=icon)
+            self.iconphoto(True, self._icon_image)
+        except tk.TclError:
+            pass
+
     def _build(self) -> None:
         header = ttk.Frame(self, style="TFrame", padding=(14, 10, 14, 4))
         header.pack(fill="x")

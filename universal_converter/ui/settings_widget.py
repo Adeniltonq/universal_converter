@@ -10,7 +10,7 @@ from ..media.catalog import AudioOption, VideoOption
 from ..media.codecs import (
     AUDIO_CODECS, AUDIO_CONTAINER_KEYS, CHANNELS, CODEC_COPY, CODEC_NONE, CONTAINERS,
     INPUT_CODEC_LABEL, VIDEO_CODECS, VIDEO_CONTAINER_KEYS, VIDEO_EXTRA_ARGS,
-    VIDEO_LEVELS, VIDEO_PROFILES, PIXEL_FORMATS,
+    VIDEO_LEVELS, VIDEO_PRESETS, VIDEO_PROFILES, PIXEL_FORMATS,
 )
 from ..media.models import AudioSettings, VideoSettings
 from ..naming.engine import NamingContext, NamingEngine
@@ -277,6 +277,21 @@ class ConversionPanel(ttk.Frame):
         ttk.Checkbutton(checks, text="Remover silêncio inicial", variable=self.var_trim,
                         command=self.changed).pack(anchor="w")
         row += 1
+        ttk.Label(card, text="Capa", style="Card.TLabel").grid(
+            row=row, column=0, sticky="w", pady=3)
+        cover_frame = ttk.Frame(card, style="Card.TFrame")
+        cover_frame.grid(row=row, column=1, sticky="ew", pady=3)
+        self.var_cover_image = tk.StringVar(value="")
+        self.lbl_cover = ttk.Label(cover_frame, text="(usar a capa do arquivo)",
+                                   style="Muted.TLabel", wraplength=200)
+        self.lbl_cover.pack(side="left", fill="x", expand=True)
+        ttk.Button(cover_frame, text="Escolher…", style="Small.TButton",
+                   command=self._pick_cover).pack(side="right")
+        ttk.Button(cover_frame, text="Limpar", style="Small.TButton",
+                   command=self._clear_cover).pack(side="right", padx=4)
+        tooltip(cover_frame, "Imagem usada como capa do arquivo de saída "
+                             "(JPEG/PNG). Sobrescreve a capa original.")
+        row += 1
         ttk.Label(card, text="Faixa de áudio", style="Card.TLabel").grid(
             row=row, column=0, sticky="w", pady=3)
         self.var_stream = tk.StringVar()
@@ -316,7 +331,7 @@ class ConversionPanel(ttk.Frame):
             row=2, column=0, sticky="w", pady=3)
         self.var_vmode = tk.StringVar(value="crf")
         mode_frame = ttk.Frame(card, style="Card.TFrame")
-        mode_frame.grid(row=2, column=1, sticky="w", pady=3)
+        mode_frame.grid(row=2, column=2, sticky="w", pady=3)
         self.rb_vcrf = ttk.Radiobutton(mode_frame, text="Qualidade (CRF/CQ)", value="crf",
                                        variable=self.var_vmode,
                                        command=self._on_vmode_changed)
@@ -325,6 +340,17 @@ class ConversionPanel(ttk.Frame):
                                        variable=self.var_vmode,
                                        command=self._on_vmode_changed)
         self.rb_vabr.pack(side="left", padx=(12, 0))
+
+        ttk.Label(card, text="Preset rápido", style="Card.TLabel").grid(
+            row=2, column=0, sticky="w", pady=3)
+        self.var_vpreset_quick = tk.StringVar(value=list(VIDEO_PRESETS)[0])
+        self.combo_vpreset_quick = ttk.Combobox(card, textvariable=self.var_vpreset_quick,
+                                                values=list(VIDEO_PRESETS),
+                                                state="readonly")
+        self.combo_vpreset_quick.grid(row=2, column=1, sticky="ew", pady=3)
+        self.combo_vpreset_quick.bind("<<ComboboxSelected>>", self._on_quick_preset)
+        tooltip(self.combo_vpreset_quick, "Ajusta rapidamente qualidade/bitrate. "
+                                          "Os campos abaixo continuam editáveis.")
 
         ttk.Label(card, text="Qualidade", style="Card.TLabel").grid(
             row=3, column=0, sticky="w", pady=3)
@@ -458,6 +484,46 @@ class ConversionPanel(ttk.Frame):
                                   command=self._add_files)
         self.btn_add.pack(side="right", padx=(0, 8))
 
+    def _pick_cover(self) -> None:
+        from tkinter import filedialog
+        path = filedialog.askopenfilename(
+            parent=self, title="Escolher imagem da capa",
+            filetypes=[("Imagens", "*.jpg *.jpeg *.png *.bmp *.webp"),
+                       ("Todos os arquivos", "*")])
+        if path:
+            self.var_cover_image.set(path)
+            import os as _os
+            self.lbl_cover.configure(text=_os.path.basename(path))
+            self.changed()
+
+    def _clear_cover(self) -> None:
+        self.var_cover_image.set("")
+        self.lbl_cover.configure(text="(usar a capa do arquivo)")
+        self.changed()
+
+    def _on_quick_preset(self, _event=None) -> None:
+        preset = VIDEO_PRESETS.get(self.var_vpreset_quick.get(), {})
+        codec = preset.get("codec")
+        if codec == "copy":
+            for label, option in self._video_option_map.items():
+                if option.id == "copy":
+                    self.var_vcodec.set(label)
+                    break
+            self.var_vmode.set("crf")
+            self.update_visibility()
+            self.changed()
+            return
+        if "quality" in preset:
+            self.var_vmode.set("crf")
+            self.var_vquality.set(float(preset["quality"]))
+        if "bitrate" in preset:
+            self.var_vmode.set("abr")
+            self.var_vbitrate.set(preset["bitrate"])
+        elif self.var_vmode.get() == "abr" and "bitrate" not in preset:
+            self.var_vmode.set("crf")
+        self.update_visibility()
+        self.changed()
+
     def _add_files(self) -> None:
         if hasattr(self.app, "request_add_files"):
             self.app.request_add_files()
@@ -486,6 +552,11 @@ class ConversionPanel(ttk.Frame):
             self.var_metadata.set(app.audio.copy_metadata)
             self.var_cover.set(app.audio.cover_copy)
             self.var_trim.set(app.audio.trim_silence)
+            image = app.audio.cover_image or ""
+            self.var_cover_image.set(image)
+            import os as _os
+            self.lbl_cover.configure(text=(_os.path.basename(image) if image
+                                           else "(usar a capa do arquivo)"))
             self._refresh_video_containers(preferred=app.container
                                            if app.kind == "video" else "")
             self._refresh_video_codecs()
@@ -591,6 +662,7 @@ class ConversionPanel(ttk.Frame):
             stream=stream,
             copy_metadata=bool(self.var_metadata.get()),
             cover_copy=bool(self.var_cover.get()),
+            cover_image=self.var_cover_image.get().strip(),
         )
 
     def collect_video(self) -> VideoSettings:

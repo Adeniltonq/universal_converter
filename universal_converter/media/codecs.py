@@ -295,6 +295,14 @@ VIDEO_PROFILES: dict[str, tuple[str, ...]] = {
     "h263": (),
 }
 
+VIDEO_PRESETS = {
+    "Equilibrado (padrão)": {"codec": None, "mode": "crf"},
+    "Qualidade (arquivo grande)": {"codec": None, "mode": "crf", "quality": 18},
+    "Arquivo pequeno": {"codec": None, "mode": "crf", "quality": 30},
+    "Streaming — bitrate fixo": {"codec": None, "mode": "abr", "bitrate": "4M"},
+    "Cópia rápida (sem recodificar)": {"codec": "copy", "mode": "crf"},
+}
+
 VIDEO_LEVELS: dict[str, tuple[str, ...]] = {
     "h264": ("3.0", "3.1", "3.2", "4.0", "4.1", "4.2", "5.0", "5.1", "5.2", "6.0"),
     "hevc": ("3.0", "3.1", "4.0", "4.1", "5.0", "5.1", "5.2", "6.0", "6.1", "6.2"),

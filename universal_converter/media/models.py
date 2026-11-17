@@ -304,6 +304,7 @@ class AudioSettings:
     stream: str = "auto"               # auto | índice | "all"
     copy_metadata: bool = True
     cover_copy: bool = True
+    cover_image: str = ""          # imagem própria para a capa (opcional)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -380,6 +381,7 @@ class ConversionConfig:
     video: VideoSettings = field(default_factory=VideoSettings)
     subtitles: str = "copy"             # copy | none
     chapters: bool = True
+    preset_name: str = ""               # nome do preset de vídeo escolhido (se houver)
 
     def to_dict(self) -> dict:
         return {
@@ -389,6 +391,7 @@ class ConversionConfig:
             "video": self.video.to_dict(),
             "subtitles": self.subtitles,
             "chapters": self.chapters,
+            "preset_name": self.preset_name,
         }
 
     @classmethod
@@ -401,6 +404,7 @@ class ConversionConfig:
             video=VideoSettings.from_dict(data.get("video")),
             subtitles=data.get("subtitles", "copy"),
             chapters=bool(data.get("chapters", True)),
+            preset_name=data.get("preset_name", ""),
         )
 
 

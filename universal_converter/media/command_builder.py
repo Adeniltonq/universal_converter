@@ -290,9 +290,12 @@ class CommandBuilder:
         # Para ele a capa vem depois do arquivo.
         cover_first = bool(container.muxer != "ipod")
         cover_path = ""
-        if want_audio and config.audio.cover_copy and info.cover_streams and \
-                self.catalog.supports_cover(container_key) and not want_video:
-            cover_path = self._extract_cover(job_file, info)
+        if want_audio and self.catalog.supports_cover(container_key) and not want_video:
+            if config.audio.cover_image and os.path.isfile(config.audio.cover_image):
+                # capa fornecida pelo usuário (troca/substitui a original)
+                cover_path = self._prepare_cover_file(config.audio.cover_image)
+            elif config.audio.cover_copy and info.cover_streams:
+                cover_path = self._extract_cover(job_file, info)
 
         hw: list[str] = []
         if want_video and config.video.hw_decode and info.main_video:
@@ -605,6 +608,28 @@ class CommandBuilder:
         return args, warnings, filters
 
     # -- capa ------------------------------------------------------------
+    def _prepare_cover_file(self, path: str) -> str:
+        """Copia a imagem escolhida para o cache (evita arquivos temporários)."""
+        ext = os.path.splitext(path)[1].lower().lstrip(".") or "jpg"
+        if ext not in ("jpg", "jpeg", "png", "bmp", "webp"):
+            ext = "jpg"
+        folder = os.path.join(app_data_dir(), "cache")
+        try:
+            os.makedirs(folder, exist_ok=True)
+        except OSError:
+            return path
+        target = os.path.join(folder, sanitize_filename(
+            f"user_cover_{abs(hash(path)) & 0xFFFFFFFF}.{ext}"))
+        try:
+            if not os.path.isfile(target) or \
+                    os.path.getmtime(target) < os.path.getmtime(path) or \
+                    os.path.getsize(target) != os.path.getsize(path):
+                import shutil
+                shutil.copyfile(path, target)
+        except OSError:
+            return path
+        return target
+
     def _extract_cover(self, job_file: str, info: MediaInfo) -> str:
         """Extrai a capa APIC para um arquivo temporário (necessário para remux)."""
         cover = info.cover_streams[0]
