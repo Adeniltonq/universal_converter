@@ -580,8 +580,9 @@ class QueueManager:
             for warning in build.warnings:
                 self._emit("job_warning", job=job, message=warning)
             if build.container != job.config.container:
-                job.config.container = build.container
-                self.store.update(job, fields=["config"])
+                # contêiner efetivo diferente (ex.: "copiar" → .aac/.mka) por esta execução
+                self._emit("job_warning", job=job,
+                           message=f"Contêiner de saída efetivo: {build.container}.")
             duration = info.duration or 0.0
             runner = JobRunner(self.ff.ffmpeg)
             self._emit("job_output", job=job, path=final_path)

@@ -152,7 +152,7 @@ class ConversionPanel(ttk.Frame):
                                             state="readonly", width=34)
         self.combo_container.grid(row=row, column=1, sticky="ew", pady=3)
         self.combo_container.bind("<<ComboboxSelected>>", self._on_container_changed)
-        self.combo_container.bind("<FocusOut>", lambda _e: self._on_container_changed())
+        self.combo_container.bind("<FocusOut>", self._on_container_focus_out)
         tooltip(self.combo_container, "Contêiner (formato do arquivo). Oferece só os "
                                       "formatos e codecs presentes no seu FFmpeg.")
         row += 1
@@ -163,7 +163,6 @@ class ConversionPanel(ttk.Frame):
                                         state="readonly", width=34)
         self.combo_codec.grid(row=row, column=1, sticky="ew", pady=3)
         self.combo_codec.bind("<<ComboboxSelected>>", self._on_codec_changed)
-        self.combo_codec.bind("<FocusOut>", lambda _e: self._on_codec_changed())
         tooltip(self.combo_codec, "Codec é diferente de contêiner: AAC pode estar em "
                                   ".m4a ou .aac (ADTS); MP3 usa o contêiner MP3.")
         self._audio_option_map: dict[str, AudioOption] = {}
@@ -846,6 +845,11 @@ class ConversionPanel(ttk.Frame):
         self.update_visibility()
         self.changed()
 
+    def _on_container_focus_out(self, _event=None) -> None:
+        # confirma o texto digitado no combobox quando o usuário sai do campo
+        if not self._loading and self.var_container.get() in self._audio_container_map:
+            self._on_container_changed()
+
     def _on_codec_changed(self, _event=None) -> None:
         if self._loading:
             return
@@ -1056,8 +1060,17 @@ class ConversionPanel(ttk.Frame):
         self.notify(message)
 
     def _extract_copy(self) -> None:
-        self._apply_extraction({"audio.codec": "copy"}, "audio", "copy",
-                               "Extração sem recodificação agendada.")
+        ids = self._target_ids()
+        if not ids:
+            self.notify("Selecione arquivos na aba Arquivos primeiro.")
+            return
+        config = self.app.config_snapshot()
+        config.kind = "audio"
+        config.container = "copy"
+        config.audio.codec = "copy"
+        config.audio.cover_copy = False  # cópia pura: nada de reembutir capa
+        self.app.queue.set_job_config(ids, config)
+        self.notify("Extração sem recodificação agendada.")
 
     def _extract_convert(self) -> None:
         self.changed()
