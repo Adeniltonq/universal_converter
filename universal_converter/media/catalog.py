@@ -116,6 +116,21 @@ class CodecCatalog:
     def video_encoders(self) -> set[str]:
         return self.ff.video_encoders()
 
+    def extra_video_encoders(self) -> list[str]:
+        """Encoders de vídeo "extras" presentes no FFmpeg mas fora do catálogo.
+
+        Não inventamos compatibilidade: só listamos codecs cujo muxer de destino
+        consta como "-related" na tabela de contêineres do próprio FFmpeg, além
+        de alguns sem perdas conhecidos em Matroska/AVI/MOV.
+        """
+        available = self.ff.video_encoders()
+        known = set(VIDEO_CODECS)
+        extras = []
+        for codec_id, _label, _info in _FALLBACK_VIDEO:
+            if codec_id in available and codec_id not in known:
+                extras.append(codec_id)
+        return extras
+
     # -- contêineres ----------------------------------------------------
     def container_available(self, key: str) -> bool:
         if key == "copy":
@@ -220,9 +235,8 @@ class CodecCatalog:
                 continue
             ids.append(codec_id)
         # encoders presentes no FFmpeg mas não catalogados (ex.: ffv1, prores)
-        for codec_id, _, _ in _FALLBACK_VIDEO:
-            if codec_id in available and codec_id not in ids and \
-                    self._container_video_ok(container, codec_id):
+        for codec_id in self.extra_video_encoders():
+            if codec_id not in ids and self._container_video_ok(container, codec_id):
                 ids.append(codec_id)
         for codec_id in ids:
             if codec_id in VIDEO_CODECS:
@@ -230,7 +244,8 @@ class CodecCatalog:
                 label = info.label
             else:
                 info = None
-                label = dict((c, l) for c, l, _ in _FALLBACK_VIDEO).get(codec_id, codec_id)
+                label = dict((c, l) for c, l, _ in _FALLBACK_VIDEO).get(
+                    codec_id, codec_id)
             options.append(VideoOption(codec_id, label, info))
         return options
 

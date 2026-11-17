@@ -265,6 +265,23 @@ class CommandBuilder:
         if not want_audio and config.kind == "audio":
             result.warnings.append("O arquivo não tem áudio; só o vídeo será processado.")
 
+        # encoder de áudio substituído no início para não alterar os mapas
+        if want_audio and config.audio.codec != CODEC_COPY:
+            input_codec = _input_audio_codec(info)
+            allowed = {o.id for o in self.catalog.audio_options(container_key, input_codec)}
+            if config.audio.codec not in allowed:
+                replacement = self._compatible_audio(config.audio.codec, container_key,
+                                                     input_codec)
+                if replacement is None:
+                    result.error = (f"O contêiner \"{container.label}\" não aceita o "
+                                    f"codec de áudio {config.audio.codec} nesta instalação "
+                                    f"do FFmpeg.")
+                    return result
+                result.warnings.append(
+                    f"Codec de áudio ajustado para {replacement} "
+                    f"(incompatível com {container.label}).")
+                config.audio.codec = replacement
+
         # ---------------- entradas ------------------------------------
         # O muxer ipod exige a entrada principal como entrada 0 (`0:a`).
         # Para ele a capa vem depois do arquivo.
@@ -298,25 +315,6 @@ class CommandBuilder:
             if config.audio.codec == CODEC_COPY:
                 args += ["-c:a", "copy"]
             else:
-                input_codec = _input_audio_codec(info)
-                allowed = {o.id for o in self.catalog.audio_options(container_key,
-                                                                    input_codec)}
-                if config.audio.codec not in allowed:
-                    if config.audio.codec == CODEC_COPY:
-                        result.error = (f"O contêiner \"{container.label}\" não aceita "
-                                        f"cópia do áudio {input_codec}.")
-                        return result
-                    replacement = self._compatible_audio(config.audio.codec, container_key,
-                                                         input_codec)
-                    if replacement is None:
-                        result.error = (f"O contêiner \"{container.label}\" não aceita "
-                                        f"o codec de áudio {config.audio.codec} nesta "
-                                        f"instalação do FFmpeg.")
-                        return result
-                    result.warnings.append(
-                        f"Codec de áudio ajustado para {replacement} "
-                        f"(incompatível com {container.label}).")
-                    config.audio.codec = replacement
                 audio_args, audio_warnings = self._audio_args(config, container_key)
                 result.warnings.extend(audio_warnings)
                 if audio_args is None:
