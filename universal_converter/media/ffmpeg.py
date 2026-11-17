@@ -28,6 +28,11 @@ class FFmpegNotFound(RuntimeError):
     pass
 
 
+# Um ffprobe pode demorar bastante em arquivos grandes/em rede; 30 s era
+# pouco e gerava "timeout" falso. O executor limita ocupação, não o tempo.
+PROBE_TIMEOUT = 180.0
+
+
 def _run(args: list[str], timeout: float = 30.0) -> tuple[int, str, str]:
     try:
         proc = subprocess.run(
@@ -244,7 +249,7 @@ class FFmpegInfo:
 # Análise de mídia
 # ---------------------------------------------------------------------------
 
-def probe_file(ffprobe: str, path: str, timeout: float = 60.0) -> dict:
+def probe_file(ffprobe: str, path: str, timeout: float = PROBE_TIMEOUT) -> dict:
     args = [ffprobe, "-v", "error", "-print_format", "json",
             "-show_format", "-show_streams", "-show_chapters", path]
     rc, out, err = _run(args, timeout=timeout)

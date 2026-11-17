@@ -74,6 +74,7 @@ class FileQueuePanel(ttk.Frame):
         self._refresh_list = True
         self._compact = False
         self._hidden_columns: tuple[str, ...] = ()
+        self._select_all_ids: set[int] | None = None
 
         self._build_toolbar()
         self._build_tree()
@@ -159,6 +160,7 @@ class FileQueuePanel(ttk.Frame):
         self.tree.pack(side="left", fill="both", expand=True)
         self.yscroll.pack(side="right", fill="y")
 
+        self.tree.bind("<Button-1>", self._forget_select_all, add="+")
         self.tree.bind("<<TreeviewSelect>>", self._on_select)
         self.tree.bind("<Double-1>", self._on_double_click)
         self.tree.bind("<Button-3>", self._on_right_click)
@@ -509,8 +511,17 @@ class FileQueuePanel(ttk.Frame):
     # Seleção
     # ------------------------------------------------------------------
     def selected_ids(self) -> list[int]:
+        explicit = getattr(self, "_select_all_ids", None)
+        if explicit:
+            return sorted(explicit)
         return [self._iid_job[iid] for iid in self.tree.selection()
                 if iid in self._iid_job]
+
+    def clear_selection_memory(self) -> None:
+        self._select_all_ids = None
+
+    def _forget_select_all(self, _event=None) -> None:
+        self._select_all_ids = None
 
     def selected_jobs(self) -> list:
         return [job for job in (self.app.queue.job(i) for i in self.selected_ids())
@@ -545,6 +556,18 @@ class FileQueuePanel(ttk.Frame):
         if ids:
             self.app.queue.remove_jobs(ids)
             self.refresh(force=True)
+
+    def select_all(self) -> None:
+        """Seleciona toda a fila visível (mesmo com a tabela virtualizada)."""
+        ids = list(self._visible_ids)
+        if not ids:
+            return
+        self._select_all_ids = set(ids)
+        self.tree.selection_set(tuple(f"job{i}" for i in ids if f"job{i}"
+                                      in self.tree.get_children()))
+        jobs = [job for job in (self.app.queue.job(i) for i in ids) if job is not None]
+        if jobs:
+            self.callbacks["jobs_selected"](jobs)
 
     def _clear(self) -> None:
         from .dialogs import confirm

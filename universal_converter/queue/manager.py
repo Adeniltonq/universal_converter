@@ -322,8 +322,10 @@ class QueueManager:
         def worker() -> None:
             from concurrent.futures import ThreadPoolExecutor, as_completed
             done = 0
-            # cada FFprobe custa ~100-130 ms; poucos em paralelo saturam a E/S
-            images = min(8, max(2, (os.cpu_count() or 4)))
+            # Cada ffprobe lê o cabeçalho (e às vezes o final) do arquivo: com
+            # muitos em paralelo a E/S satura e tudo fica lento. O limite fixo
+            # pequeno é mais previsível que "número de CPUs".
+            images = 4
             with ThreadPoolExecutor(max_workers=images,
                                     thread_name_prefix="analyze") as pool:
                 futures = {pool.submit(self.analyzer.analyze, job.file): job

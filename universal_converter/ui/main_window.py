@@ -144,6 +144,7 @@ class MainWindow(tk.Tk):
         bus.subscribe("queue:batch_resumed", lambda _p: self.files_panel.mark_dirty())
         bus.subscribe("queue:error", lambda p: self.notify(p.get("message", ""),
                                                            error=True))
+        bus.subscribe("queue_restored", self._on_queue_restored)
         bus.subscribe("ui_error", lambda p: dialogs.error(self, "Erro", p.get("message", "")))
 
     def _poll(self) -> None:
@@ -161,14 +162,19 @@ class MainWindow(tk.Tk):
 
     # ------------------------------------------------------------------
     def _restore_queue(self) -> None:
-        self.app.queue.load()
-        cached = self.app.queue.load_cached_infos()
-        self.files_panel.refresh(force=True)
-        self._load_queue_metadata()
-        if self.app.queue.jobs:
-            self.notify(f"{len(self.app.queue.jobs)} tarefa(s) restaurada(s) da sessão "
-                        f"anterior" + (f" ({cached} com análise em cache)."
-                                       if cached else "."))
+        """Carrega a sessão anterior sem bloquear a abertura da janela."""
+        self.lbl_status.configure(text="Carregando a fila anterior…")
+        self.update_idletasks()
+
+        def worker() -> None:
+            self.app.queue.load()
+            cached = self.app.queue.load_cached_infos()
+            self.app.bus.emit("queue_restored", count=len(self.app.queue.jobs),
+                              cached=cached)
+
+        self._restore_thread = threading.Thread(target=worker, daemon=True,
+                                                name="restore-queue")
+        self._restore_thread.start()
 
     def _load_queue_metadata(self) -> None:
         """Pede ao FFprobe (em segundo plano) os dados que faltam na tabela."""
@@ -176,10 +182,19 @@ class MainWindow(tk.Tk):
         if not jobs:
             return
 
-        def worker() -> None:
-            self.app.analyzer.analyze_streams([job.file for job in jobs], workers=4)
+        from ..queue.batch import load_metadata_in_background
+        load_metadata_in_background(self.app.analyzer, jobs,
+                                    lambda: self.app.bus.emit("queue_metadata_done"))
 
-        threading.Thread(target=worker, daemon=True, name="queue-metadata").start()
+    def _on_queue_restored(self, payload) -> None:
+        count = payload.get("count", 0)
+        cached = payload.get("cached", 0)
+        self.files_panel.refresh(force=True)
+        self.lbl_status.configure(text="Pronto.")
+        if count:
+            self.notify(f"{count} tarefa(s) restaurada(s) da sessão anterior"
+                        + (f" ({cached} com análise em cache)." if cached else "."))
+            self._load_queue_metadata()
 
     def _initial_checks(self) -> None:
         if self.app.ff.error:
@@ -287,7 +302,7 @@ class MainWindow(tk.Tk):
 
     def _select_all(self) -> None:
         if self.notebook.index(self.notebook.select()) == 0:
-            self.files_panel.tree.selection_set(self.files_panel.tree.get_children())
+            self.files_panel.select_all()
 
     # ------------------------------------------------------------------
     # Configuração e seleção
