@@ -11,7 +11,7 @@ from ..media.models import NamingTemplate
 from ..naming.engine import DEFAULT_PRESET_TEMPLATES, VARIABLES, validate_template
 from ..naming.engine import NamingContext, NamingEngine
 from . import theme
-from .theme import hint, section, tooltip
+from .theme import make_button, make_checkbutton, hint, section, tooltip
 
 CASE_OPTIONS = {"Manter como está": "keep", "minúsculas": "lower",
                 "MAIÚSCULAS": "upper", "Primeira Letra Maiúscula": "title"}
@@ -28,26 +28,52 @@ class NamingPanel(ttk.Frame):
         header = ttk.Frame(self, style="TFrame")
         header.pack(fill="x")
         ttk.Label(header, text="Nomenclatura", style="Title.TLabel").pack(side="left")
-        ttk.Label(header, text="O nome original é sempre preservado; o modelo pode ser "
-                               "refeito sem perda.", style="MutedBg.TLabel"
-                  ).pack(side="left", padx=12)
+        self.lbl_subtitle = ttk.Label(header,
+                                      text="O nome original é sempre preservado.",
+                                      style="MutedBg.TLabel")
+        self.lbl_subtitle.pack(side="left", padx=12)
 
         body = ttk.Frame(self, style="TFrame")
         body.pack(fill="both", expand=True, pady=(10, 0))
+        self.body = body
         body.columnconfigure(0, weight=3)
         body.columnconfigure(1, weight=2)
         body.rowconfigure(0, weight=1)
 
         left = ttk.LabelFrame(body, text="Modelo de nome", style="TLabelframe", padding=10)
         left.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
+        self.left = left
         self._build_model(left)
         right = ttk.LabelFrame(body, text="Pré-visualização", style="TLabelframe",
                                padding=10)
         right.grid(row=0, column=1, sticky="nsew")
+        self.right = right
         self._build_preview(right)
 
         self._loading = False
         self.load_from_app()
+        self._stacked = False
+        self.bind("<Configure>", self._on_resize)
+
+    def _on_resize(self, event) -> None:
+        """Empilha os painéis em janelas estreitas (nada fica espremido)."""
+        stacked = event.width < 900
+        if stacked == self._stacked:
+            return
+        self._stacked = stacked
+        body = self.body
+        for child in body.grid_slaves():
+            child.grid_forget()
+        if stacked:
+            body.columnconfigure(0, weight=1)
+            body.columnconfigure(1, weight=0)
+            self.left.grid(row=0, column=0, sticky="ew", padx=0)
+            self.right.grid(row=1, column=0, sticky="nsew", pady=(8, 0))
+        else:
+            body.columnconfigure(0, weight=3)
+            body.columnconfigure(1, weight=2)
+            self.left.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
+            self.right.grid(row=0, column=1, sticky="nsew")
 
     # ------------------------------------------------------------------
     def _build_model(self, parent: ttk.Frame) -> None:
@@ -69,9 +95,8 @@ class NamingPanel(ttk.Frame):
                                 ("Artista - título", "{artist} - {title}"),
                                 ("Álbum/número", "{album}/{index} - {title}"),
                                 ("Nome + codec", "{name}_{codec}")):
-            button = ttk.Button(presets, text=label, style="Small.TButton",
-                                command=lambda t=template: self._apply_preset(t))
-            button.pack(side="left", padx=(0, 4))
+            make_button(presets, label, lambda t=template: self._apply_preset(t),
+                        "Small.TButton").pack(side="left", padx=(0, 4))
 
         row += 1
         section(parent, "Ajustes").grid(row=row, column=0, columnspan=3, sticky="w",
@@ -122,15 +147,15 @@ class NamingPanel(ttk.Frame):
         opts = ttk.Frame(parent, style="Card.TFrame")
         opts.grid(row=row, column=0, columnspan=3, sticky="w", pady=(4, 2))
         self.var_sanitize = tk.BooleanVar(value=True)
-        ttk.Checkbutton(opts, text="Remover caracteres inválidos", variable=self.var_sanitize,
-                        command=self._on_change).pack(anchor="w")
+        make_checkbutton(opts, "Remover caracteres inválidos", self.var_sanitize,
+                         command=self._on_change).pack(anchor="w")
         row += 1
 
         num = ttk.Frame(parent, style="Card.TFrame")
         num.grid(row=row, column=0, columnspan=3, sticky="w", pady=(6, 0))
         self.var_numbering = tk.BooleanVar(value=False)
-        ttk.Checkbutton(num, text="Numeração automática", variable=self.var_numbering,
-                        command=self._on_change).pack(side="left")
+        make_checkbutton(num, "Numeração automática", self.var_numbering,
+                         command=self._on_change).pack(side="left")
         self.var_number_start = tk.IntVar(value=1)
         self.var_number_padding = tk.IntVar(value=2)
         self.var_number_position = tk.StringVar(value="Prefixo")
@@ -147,29 +172,31 @@ class NamingPanel(ttk.Frame):
         combo.bind("<<ComboboxSelected>>", lambda _e: self._on_change())
 
     def _build_preview(self, parent: ttk.Frame) -> None:
-        parent.rowconfigure(1, weight=1)
+        parent.rowconfigure(2, weight=1)
         parent.columnconfigure(0, weight=1)
         self.lbl_result = ttk.Label(parent, text="", style="Card.TLabel",
-                                    font=(None, 11, "bold"), wraplength=360)
-        self.lbl_result.grid(row=0, column=0, sticky="w", pady=(0, 6))
+                                    font=(None, 11, "bold"), wraplength=340,
+                                    justify="left")
+        self.lbl_result.grid(row=0, column=0, sticky="ew", pady=(0, 4))
         self.lbl_warning = ttk.Label(parent, text="", style="Hint.TLabel",
-                                     foreground=theme.WARN, wraplength=360)
-        self.lbl_warning.grid(row=1, column=0, sticky="nw")
+                                     foreground=theme.WARN, wraplength=340)
+        self.lbl_warning.grid(row=1, column=0, sticky="ew", pady=(0, 6))
         self.preview_list = tk.Listbox(parent, background=theme.BG_ALT, foreground=theme.FG,
                                        relief="flat", highlightthickness=1,
                                        highlightbackground=theme.BORDER, activestyle="none",
-                                       selectbackground=theme.SEL, height=10)
-        self.preview_list.grid(row=1, column=0, sticky="nsew", pady=(36, 6))
+                                       selectbackground=theme.SEL, height=8)
+        self.preview_list.grid(row=2, column=0, sticky="nsew", pady=(0, 6))
         variables = ttk.LabelFrame(parent, text="Variáveis disponíveis",
                                    style="TLabelframe", padding=6)
-        variables.grid(row=2, column=0, sticky="ew")
+        variables.grid(row=3, column=0, sticky="ew")
         text = "  ".join(f"{{{name}}}" for name, _ in VARIABLES)
-        ttk.Label(variables, text=text, style="Muted.TLabel", wraplength=360
-                  ).pack(anchor="w")
+        self.lbl_variables = ttk.Label(variables, text=text, style="Muted.TLabel",
+                                       wraplength=340, justify="left")
+        self.lbl_variables.pack(fill="x")
         self.var_sample = tk.StringVar(value="Usar o primeiro arquivo da fila")
-        ttk.Checkbutton(variables, text="Pré-visualizar com o arquivo selecionado",
-                        variable=self.var_sample, command=self._on_change
-                        ).pack(anchor="w", pady=(4, 0))
+        make_checkbutton(variables, "Pré-visualizar com o arquivo selecionado",
+                         self.var_sample, command=self._on_change,
+                         background=theme.PANEL).pack(anchor="w", pady=(4, 0))
 
     # ------------------------------------------------------------------
     def _apply_preset(self, template: str) -> None:

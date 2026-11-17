@@ -10,7 +10,7 @@ from typing import Callable
 from ..queue.scheduler import compute_plan, logical_cpus
 from . import theme
 from .dialogs import ask_folder
-from .theme import hint, section, tooltip
+from .theme import BG, make_button, make_checkbutton, make_radiobutton, hint, section, tooltip
 
 
 class PerformancePanel(ttk.Frame):
@@ -27,7 +27,8 @@ class PerformancePanel(ttk.Frame):
         ttk.Label(header, text=f"Detectado: {self.cpus} threads lógicas",
                   style="MutedBg.TLabel").pack(side="left", padx=12)
 
-        body = ttk.Frame(self, style="TFrame")
+        self.body = ttk.Frame(self, style="TFrame")
+        body = self.body
         body.pack(fill="both", expand=True, pady=(10, 0))
         body.columnconfigure(0, weight=1, uniform="col")
         body.columnconfigure(1, weight=1, uniform="col")
@@ -37,6 +38,30 @@ class PerformancePanel(ttk.Frame):
         self._build_output(body)
         self._loading = False
         self.load_from_settings()
+        self._stacked = getattr(self, "_stacked", False)
+        self.bind("<Configure>", self._on_resize)
+        self._stacked = not (self.winfo_width() >= 1000)
+        self._on_resize(simple=True)
+
+    def _on_resize(self, event=None, simple: bool = False) -> None:
+        """Empilha os cartões em janelas estreitas para não cortar campos."""
+        width = self.winfo_width() if simple else getattr(event, "width", 0)
+        stacked = width < 980
+        if stacked == getattr(self, "_stacked", None):
+            return
+        self._stacked = stacked
+        for child in self.body.grid_slaves():
+            child.grid_forget()
+        if stacked:
+            self.body.columnconfigure(0, weight=1)
+            self.body.columnconfigure(1, weight=0)
+            self.card_threads.grid(row=0, column=0, sticky="ew", padx=0)
+            self.card_output.grid(row=1, column=0, sticky="ew", pady=(8, 0))
+        else:
+            self.body.columnconfigure(0, weight=1, uniform="col")
+            self.body.columnconfigure(1, weight=1, uniform="col")
+            self.card_threads.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
+            self.card_output.grid(row=0, column=1, sticky="nsew")
 
     # ------------------------------------------------------------------
     def _build_threads(self, parent: ttk.Frame) -> None:
@@ -44,6 +69,7 @@ class PerformancePanel(ttk.Frame):
                               padding=10)
         card.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
         card.columnconfigure(1, weight=1)
+        self.card_threads = card
 
         ttk.Label(card, text="Threads de execução", style="Card.TLabel").grid(
             row=0, column=0, sticky="w", pady=3)
@@ -107,16 +133,17 @@ class PerformancePanel(ttk.Frame):
                               padding=10)
         card.grid(row=0, column=1, sticky="nsew")
         card.columnconfigure(1, weight=1)
+        self.card_output = card
 
         self.var_mode = tk.StringVar(value="folder")
         radios = ttk.Frame(card, style="Card.TFrame")
         radios.grid(row=0, column=0, columnspan=3, sticky="w")
-        ttk.Radiobutton(radios, text="Salvar em uma pasta de destino", value="folder",
-                        variable=self.var_mode, command=self._on_mode_change
-                        ).pack(anchor="w")
-        ttk.Radiobutton(radios, text="Salvar ao lado do arquivo original", value="beside",
-                        variable=self.var_mode, command=self._on_mode_change
-                        ).pack(anchor="w")
+        make_radiobutton(radios, "Salvar em uma pasta de destino", self.var_mode,
+                         "folder", command=self._on_mode_change,
+                         background=theme.PANEL).pack(anchor="w")
+        make_radiobutton(radios, "Salvar ao lado do arquivo original", self.var_mode,
+                         "beside", command=self._on_mode_change,
+                         background=theme.PANEL).pack(anchor="w")
 
         ttk.Label(card, text="Pasta de destino", style="Card.TLabel").grid(
             row=1, column=0, sticky="w", pady=3)
@@ -124,8 +151,8 @@ class PerformancePanel(ttk.Frame):
         entry = ttk.Entry(card, textvariable=self.var_output)
         entry.grid(row=1, column=1, sticky="ew", pady=3)
         entry.bind("<FocusOut>", lambda _e: self._on_change())
-        self.btn_browse = ttk.Button(card, text="Escolher…", style="Small.TButton",
-                                     command=self._pick_folder)
+        self.btn_browse = make_button(card, "Escolher…", self._pick_folder,
+                                      "Small.TButton")
         self.btn_browse.grid(row=1, column=2, padx=(6, 0))
 
         self.var_structure = tk.BooleanVar(value=True)
@@ -133,15 +160,13 @@ class PerformancePanel(ttk.Frame):
         self.var_avoid = tk.BooleanVar(value=True)
         opts = ttk.Frame(card, style="Card.TFrame")
         opts.grid(row=2, column=0, columnspan=3, sticky="w", pady=(6, 0))
-        ttk.Checkbutton(opts, text="Preservar estrutura de pastas da origem",
-                        variable=self.var_structure, command=self._on_change
-                        ).pack(anchor="w")
-        ttk.Checkbutton(opts, text="Sobrescrever arquivos existentes", variable=self.var_overwrite,
-                        command=self._on_change).pack(anchor="w")
+        make_checkbutton(opts, "Preservar estrutura de pastas da origem", self.var_structure,
+                         command=self._on_change).pack(anchor="w")
+        make_checkbutton(opts, "Sobrescrever arquivos existentes", self.var_overwrite,
+                         command=self._on_change).pack(anchor="w")
         tooltip(opts, "Sem esta opção, nomes já existentes recebem ' (1)', ' (2)'…")
-        ttk.Checkbutton(opts, text="Evitar converter arquivos já presentes na pasta de destino",
-                        variable=self.var_avoid, command=self._on_change
-                        ).pack(anchor="w")
+        make_checkbutton(opts, "Evitar converter arquivos já presentes na pasta de destino",
+                         self.var_avoid, command=self._on_change).pack(anchor="w")
 
         ttk.Label(card, text="Pasta de origem (raiz)", style="Card.TLabel").grid(
             row=3, column=0, sticky="w", pady=(10, 3))
@@ -151,8 +176,8 @@ class PerformancePanel(ttk.Frame):
         entry = ttk.Entry(origin, textvariable=self.var_source)
         entry.pack(side="left", fill="x", expand=True)
         entry.bind("<FocusOut>", lambda _e: self._on_change())
-        ttk.Button(origin, text="…", style="Small.TButton", width=3,
-                   command=self._pick_source).pack(side="left", padx=(6, 0))
+        make_button(origin, "…", self._pick_source, "Small.TButton",
+                    padx=4).pack(side="left", padx=(6, 0))
         hint(card, "Usada para calcular a hierarquia relativa e para impedir que a pasta "
                    "de destino seja varrida novamente quando estiver dentro da origem."
              ).grid(row=4, column=0, columnspan=3, sticky="w")
@@ -169,11 +194,11 @@ class PerformancePanel(ttk.Frame):
                 ("Repetir erros", self._retry_errors),
                 ("Remover concluídos", self._clear_finished),
                 ("Recolocar tudo na fila", self._reset_all)):
-            button = ttk.Button(actions, text=text, style="Small.TButton", command=command)
-            button.pack(side="left", padx=(0, 6))
+            make_button(actions, text, command, "Small.TButton").pack(side="left",
+                                                                     padx=(0, 6))
 
-        ttk.Button(self.card_output_buttons, text="Diagnóstico do FFmpeg…",
-                   style="Small.TButton", command=self._show_report).grid(
+        make_button(self.card_output_buttons, "Diagnóstico do FFmpeg…",
+                    self._show_report, "Small.TButton").grid(
             row=3, column=0, sticky="w", pady=(10, 0))
 
     # ------------------------------------------------------------------

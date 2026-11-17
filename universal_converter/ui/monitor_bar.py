@@ -10,7 +10,7 @@ from tkinter import ttk
 
 from ..core.util import fmt_duration, fmt_size, fmt_speed
 from . import theme
-from .theme import tooltip
+from .theme import make_button, tooltip
 
 
 # ---------------------------------------------------------------------------
@@ -122,6 +122,10 @@ class SystemMonitor:
 # Barra
 # ---------------------------------------------------------------------------
 
+SCOPES = ["Selecionados ou fila pendente", "Somente os selecionados",
+          "Toda a fila pendente"]
+
+
 class MonitorBar(ttk.Frame):
     def __init__(self, parent: tk.Misc, controller, actions: dict):
         super().__init__(parent, style="Toolbar.TFrame", padding=(10, 8))
@@ -131,28 +135,42 @@ class MonitorBar(ttk.Frame):
         self._finished_at = 0.0
         self._last_update = 0.0
         self._build()
+        self.bind("<Configure>", self._on_resize)
+
+    def _on_resize(self, event) -> None:
+        """Compacta em janelas estreitas (nada é cortado)."""
+        narrow = event.width < 1000
+        if getattr(self, "_narrow", None) == narrow:
+            return
+        self._narrow = narrow
+        self.lbl_scope_label.pack_forget()
+        self.combo_scope.pack_forget()
+        if narrow:
+            self.combo_scope.configure(width=16)
+        else:
+            self.combo_scope.configure(width=24)
+            self.lbl_scope_label.pack(side="left", padx=(12, 6))
+            self.combo_scope.pack(side="left")
 
     def _build(self) -> None:
         top = ttk.Frame(self, style="Toolbar.TFrame")
         top.pack(fill="x")
-        self.btn_start = ttk.Button(top, text="▶  Iniciar", style="Accent.TButton",
-                                    command=self.actions["start"])
+        self.btn_start = make_button(top, "▶  Iniciar", self.actions["start"],
+                                     "Accent.TButton", pady=5)
         self.btn_start.pack(side="left")
-        self.btn_pause = ttk.Button(top, text="⏸  Pausar", command=self.actions["pause"])
+        self.btn_pause = make_button(top, "⏸  Pausar", self.actions["pause"], pady=5)
         self.btn_pause.pack(side="left", padx=(6, 0))
-        self.btn_cancel = ttk.Button(top, text="■  Cancelar", style="Danger.TButton",
-                                     command=self.actions["cancel"])
+        self.btn_cancel = make_button(top, "■  Cancelar", self.actions["cancel"],
+                                      "Danger.TButton", pady=5)
         self.btn_cancel.pack(side="left", padx=(6, 0))
         tooltip(self.btn_cancel, "Cancela as tarefas em andamento e as pendentes.")
 
-        self.var_scope = tk.StringVar(value="Selecionados (ou toda a fila pendente)")
+        self.var_scope = tk.StringVar(value="Selecionados ou fila pendente")
         self.combo_scope = ttk.Combobox(top, textvariable=self.var_scope, state="readonly",
-                                        width=32,
-                                        values=["Selecionados (ou toda a fila pendente)",
-                                                "Somente os selecionados",
-                                                "Toda a fila pendente"])
-        ttk.Label(top, text="Converter:", style="Status.TLabel").pack(side="left",
-                                                                     padx=(14, 6))
+                                        width=26,
+                                        values=SCOPES)
+        self.lbl_scope_label = ttk.Label(top, text="Converter:", style="Status.TLabel")
+        self.lbl_scope_label.pack(side="left", padx=(14, 6))
         self.combo_scope.pack(side="left")
 
         self.lbl_status = ttk.Label(top, text="Pronto", style="StatusAccent.TLabel")
@@ -160,13 +178,10 @@ class MonitorBar(ttk.Frame):
         self.lbl_cpu = ttk.Label(top, text="", style="Status.TLabel")
         self.lbl_cpu.pack(side="right", padx=8)
 
-        bottom = ttk.Frame(self, style="Toolbar.TFrame")
-        bottom.pack(fill="x", pady=(6, 0))
-        self.progress = ttk.Progressbar(bottom, mode="determinate", maximum=1000)
-        self.progress.pack(side="left", fill="x", expand=True)
-        self.lbl_progress = ttk.Label(bottom, text="", style="Status.TLabel", width=46,
-                                      anchor="e")
-        self.lbl_progress.pack(side="left", padx=(10, 0))
+        self.progress = ttk.Progressbar(top, mode="determinate", maximum=1000)
+        self.progress.pack(side="left", fill="x", expand=True, padx=(14, 0))
+        self.lbl_progress = ttk.Label(top, text="", style="Status.TLabel", anchor="e")
+        self.lbl_progress.pack(side="right", padx=(10, 8))
 
     # ------------------------------------------------------------------
     def tick(self) -> None:
@@ -196,15 +211,15 @@ class MonitorBar(ttk.Frame):
             else:
                 self.lbl_status.configure(text="Convertendo")
                 self.btn_pause.configure(text="⏸  Pausar")
-            self.btn_start.state(["disabled"])
-            self.btn_pause.state(["!disabled"])
-            self.btn_cancel.state(["!disabled"])
+            self.btn_start.configure(state="disabled")
+            self.btn_pause.configure(state="normal")
+            self.btn_cancel.configure(state="normal")
         elif pending and self.app.queue.is_running:
             self.progress["value"] = 0
             self.lbl_progress.configure(text=f"{pending} aguardando início")
             self.lbl_status.configure(text="Preparando")
-            self.btn_start.state(["disabled"])
-            self.btn_cancel.state(["!disabled"])
+            self.btn_start.configure(state="disabled")
+            self.btn_cancel.configure(state="normal")
         else:
             if total and self._finished_at:
                 stats = self.app.queue.stats
@@ -217,10 +232,11 @@ class MonitorBar(ttk.Frame):
                     text=(f"{total} arquivo(s) na fila" if total else "Fila vazia"))
                 self.lbl_status.configure(text="Pronto")
             self.progress["value"] = 0
-            self.btn_start.state(["!disabled"] if pending and not self.app.queue.is_running
-                                 else (["!disabled"] if not total else ["disabled"]))
-            self.btn_pause.state(["disabled"])
-            self.btn_cancel.state(["disabled"])
+            self.btn_start.configure(
+                state="normal" if (pending or not total) and not self.app.queue.is_running
+                else "disabled")
+            self.btn_pause.configure(state="disabled")
+            self.btn_cancel.configure(state="disabled")
             self.btn_pause.configure(text="⏸  Pausar")
 
         cpu, mem = self.monitor.read()

@@ -36,9 +36,9 @@ class ModalDialog(tk.Toplevel):
         self.bind("<Escape>", lambda _e: self.cancel())
 
     def add_button(self, text: str, command: Callable | None = None, style: str = "TButton",
-                   default: bool = False) -> ttk.Button:
-        button = ttk.Button(self.button_bar, text=text, style=style,
-                            command=command or (self.ok if default else self.cancel))
+                   default: bool = False):
+        button = theme.make_button(
+            self.button_bar, text, command or (self.ok if default else self.cancel), style)
         button.pack(side="right", padx=(6, 0))
         if default:
             button.bind("<Return>", lambda _e: button.invoke())
@@ -220,8 +220,8 @@ class FolderImportDialog(ModalDialog):
         self.var_limit = tk.StringVar(value=str(current.get("max_files", 0) or 0))
         for text, var in (("Incluir subpastas", self.var_recursive),
                           ("Incluir arquivos ocultos", self.var_hidden)):
-            ttk.Checkbutton(options, text=text, variable=var, style="Bg.TCheckbutton"
-                            ).pack(anchor="w", pady=2)
+            theme.make_checkbutton(options, text, var, background=theme.BG).pack(
+                anchor="w", pady=2)
 
         form = ttk.Frame(options, style="TFrame")
         form.pack(fill="x", pady=(8, 0))
@@ -243,8 +243,8 @@ class FolderImportDialog(ModalDialog):
         self.var_output = tk.StringVar(value=current.get("output_dir", ""))
         ttk.Entry(form, textvariable=self.var_output, width=40).grid(
             row=5, column=0, sticky="ew", pady=(2, 0))
-        ttk.Button(form, text="Escolher…", style="Small.TButton",
-                   command=self._pick_output).grid(row=5, column=1, padx=4)
+        theme.make_button(form, "Escolher…", self._pick_output, "Small.TButton").grid(
+            row=5, column=1, padx=4)
         form.columnconfigure(0, weight=1)
 
         self.summary = ttk.Label(self.body, text="", style="MutedBg.TLabel",

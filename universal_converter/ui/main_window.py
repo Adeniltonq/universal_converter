@@ -114,10 +114,10 @@ class MainWindow(tk.Tk):
         status.pack(fill="x", side="bottom")
         self.lbl_status = ttk.Label(status, text="Pronto.", style="Status.TLabel")
         self.lbl_status.pack(side="left")
-        ttk.Button(status, text="Diagnóstico", style="Small.TButton",
-                   command=self.show_report).pack(side="right")
-        ttk.Button(status, text="Sobre", style="Small.TButton",
-                   command=self.show_about).pack(side="right", padx=6)
+        theme.make_button(status, "Diagnóstico", self.show_report,
+                          "Small.TButton").pack(side="right")
+        theme.make_button(status, "Sobre", self.show_about, "Small.TButton").pack(
+            side="right", padx=6)
 
         self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
         self.bind_all("<Control-o>", lambda _e: self.add_files())
@@ -396,11 +396,13 @@ class MainWindow(tk.Tk):
     def _scope_selection(self) -> list[int] | None:
         scope = self.monitor.var_scope.get()
         selected = self.files_panel.selected_ids()
-        if scope.startswith("Somente") and not selected:
-            dialogs.info(self, "Nada selecionado",
-                         "Selecione arquivos na aba Arquivos ou escolha toda a fila.")
-            return []
-        if scope.startswith("Somente") or scope.startswith("Selecionados"):
+        if scope == "Somente os selecionados":
+            if not selected:
+                dialogs.info(self, "Nada selecionado",
+                             "Selecione arquivos na aba Arquivos ou escolha toda a fila.")
+                return []
+            return selected
+        if scope == "Selecionados ou fila pendente":
             return selected or None
         return None
 

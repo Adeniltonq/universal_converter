@@ -76,11 +76,10 @@ class AppController:
         self.tag = self.settings.get("tag", "") or ""
 
     def _load_profile_values(self, profile: Profile) -> None:
-        self.kind = profile.kind
+        self.current_profile = profile.id
         self.container = profile.container
         self.audio = AudioSettings.from_dict(profile.audio.to_dict())
         self.video = VideoSettings.from_dict(profile.video.to_dict())
-        self.current_profile = profile.id
 
     # ------------------------------------------------------------------
     # Persistência da configuração

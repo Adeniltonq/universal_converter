@@ -5,6 +5,9 @@ torno da área visível, com espaçadores (linhas vazias aninhadas) para que a
 barra de rolagem reflita o total e o deslocamento continue funcionando. Assim
 a interface permanece fluida com dezenas de milhares de tarefas. A fonte de
 dados é o `QueueManager`, persistido em SQLite.
+
+O layout se adapta: em janelas estreitas a busca quebra a linha abaixo dos
+filtros, e a barra de ferramentas quebra em duas linhas quando necessário.
 """
 
 from __future__ import annotations
@@ -20,23 +23,26 @@ from ..media.codecs import CONTAINERS, INPUT_CODEC_LABEL
 from ..media.models import MediaInfo
 from ..queue.manager import STATUS_LABEL
 from . import theme
-from .theme import tooltip
+from .theme import make_button, tooltip
 
 COLUMNS = [
-    ("status", "Status", 104),
-    ("name", "Arquivo", 250),
-    ("format", "Formato", 76),
-    ("vcodec", "Vídeo", 92),
-    ("acodec", "Áudio", 96),
-    ("resolution", "Resolução", 92),
-    ("fps", "FPS", 52),
-    ("duration", "Duração", 70),
-    ("size", "Tamanho", 78),
-    ("bitrate", "Bitrate", 88),
-    ("output", "Saída", 74),
-    ("progress", "Progresso", 86),
-    ("message", "Detalhes", 240),
+    ("status", "Status", 96),
+    ("name", "Arquivo", 230),
+    ("format", "Formato", 72),
+    ("vcodec", "Vídeo", 88),
+    ("acodec", "Áudio", 92),
+    ("resolution", "Resolução", 88),
+    ("fps", "FPS", 48),
+    ("duration", "Duração", 66),
+    ("size", "Tamanho", 74),
+    ("bitrate", "Bitrate", 84),
+    ("output", "Saída", 70),
+    ("progress", "Progresso", 76),
+    ("message", "Detalhes", 200),
 ]
+
+# colunas que somem primeiro quando a janela é estreita
+OPTIONAL_COLUMNS = ("fps", "bitrate", "resolution", "format", "output")
 
 FILTERS = ["Todos", "Aguardando", "Convertendo", "Concluídos", "Com erro", "Cancelados",
            "Somente áudio", "Somente vídeo"]
@@ -66,51 +72,71 @@ class FileQueuePanel(ttk.Frame):
         self._dirty = True
         self._last_tick = 0.0
         self._refresh_list = True
+        self._compact = False
+        self._hidden_columns: tuple[str, ...] = ()
 
         self._build_toolbar()
         self._build_tree()
         self._build_footer()
         self.refresh(force=True)
+        self.bind("<Configure>", self._on_resize)
 
     # ------------------------------------------------------------------
     # Construção
     # ------------------------------------------------------------------
     def _build_toolbar(self) -> None:
         bar = ttk.Frame(self, style="TFrame")
-        bar.pack(fill="x", pady=(0, 8))
-        ttk.Label(bar, text="Arquivos", style="Title.TLabel").pack(side="left")
+        bar.pack(fill="x", pady=(0, 6))
+        self._toolbar = bar
 
+        # linha 1: título + ações
+        top = ttk.Frame(bar, style="TFrame")
+        top.pack(fill="x")
+        ttk.Label(top, text="Arquivos", style="Title.TLabel").pack(side="left")
+        self._actions = ttk.Frame(top, style="TFrame")
+        self._actions.pack(side="left", padx=(10, 0))
         buttons = [
-            ("+ Arquivos…", lambda: self.callbacks["add_files"](),
+            ("+ Arquivos…", lambda: self.callbacks["add_files"](), "AddFiles.TButton",
              "Selecionar arquivos de mídia (Ctrl+O)"),
-            ("+ Pasta…", lambda: self.callbacks["add_folder"](),
+            ("+ Pasta…", lambda: self.callbacks["add_folder"](), "AddFolder.TButton",
              "Adicionar uma pasta, com subpastas opcionais (Ctrl+Shift+O)"),
-            ("Remover", self._remove_selected, "Remover selecionados (Del)"),
-            ("Limpar", self._clear, "Remover todas as tarefas"),
-            ("↑", lambda: self._move(-1), "Subir a tarefa selecionada"),
-            ("↓", lambda: self._move(1), "Descer a tarefa selecionada"),
+            ("Remover", self._remove_selected, "TButton", "Remover selecionados (Del)"),
+            ("Limpar", self._clear, "TButton", "Remover todas as tarefas"),
         ]
-        for index, (text, command, tip) in enumerate(buttons):
-            button = ttk.Button(bar, text=text, style="Tool.TButton", command=command)
-            button.pack(side="left", padx=(8 if index < 2 else 4, 0))
+        for text, command, style, tip in buttons:
+            button = make_button(self._actions, text, command,
+                                 style if style != "TButton" else "Tool.TButton")
+            button.pack(side="left", padx=(0, 4))
             tooltip(button, tip)
+            if text == "Limpar":
+                self._btn_clear = button
+        self._btn_up = make_button(self._actions, "↑", lambda: self._move(-1),
+                                   "Icon.TButton")
+        self._btn_up.pack(side="left", padx=(6, 2))
+        tooltip(self._btn_up, "Subir a tarefa selecionada")
+        self._btn_down = make_button(self._actions, "↓", lambda: self._move(1),
+                                     "Icon.TButton")
+        self._btn_down.pack(side="left")
+        tooltip(self._btn_down, "Descer a tarefa selecionada")
 
-        right = ttk.Frame(bar, style="TFrame")
-        right.pack(side="right")
-        self.var_filter = tk.StringVar(value=FILTERS[0])
-        combo = ttk.Combobox(right, textvariable=self.var_filter, values=FILTERS,
-                             state="readonly", width=15)
-        combo.pack(side="right", padx=(6, 0))
-        combo.bind("<<ComboboxSelected>>", lambda _e: self.set_filter(self.var_filter.get()))
-        ttk.Label(right, text="Filtro", style="MutedBg.TLabel").pack(side="right")
-
+        # linha 2: busca + filtro
+        controls = ttk.Frame(bar, style="TFrame")
+        controls.pack(fill="x", pady=(6, 0))
+        self._controls = controls
+        label = ttk.Label(controls, text="Buscar", style="MutedBg.TLabel")
+        label.pack(side="left")
         self.var_search = tk.StringVar()
-        entry = ttk.Entry(right, textvariable=self.var_search, width=28)
-        entry.pack(side="right", padx=(16, 0))
-        ttk.Label(right, text="Buscar", style="MutedBg.TLabel").pack(side="right",
-                                                                     padx=(0, 6))
+        self.search_entry = ttk.Entry(controls, textvariable=self.var_search)
+        self.search_entry.pack(side="left", fill="x", expand=True, padx=(6, 12))
         self.var_search.trace_add("write", lambda *_a: self.set_search(
             self.var_search.get()))
+        ttk.Label(controls, text="Filtro", style="MutedBg.TLabel").pack(side="left")
+        self.var_filter = tk.StringVar(value=FILTERS[0])
+        self.combo_filter = ttk.Combobox(controls, textvariable=self.var_filter,
+                                         values=FILTERS, state="readonly", width=16)
+        self.combo_filter.pack(side="left", padx=(6, 0))
+        self.combo_filter.bind("<<ComboboxSelected>>",
+                               lambda _e: self.set_filter(self.var_filter.get()))
 
     def _build_tree(self) -> None:
         wrap = ttk.Frame(self, style="TFrame")
@@ -121,7 +147,7 @@ class FileQueuePanel(ttk.Frame):
             self.tree.heading(key, text=title, command=lambda k=key: self._sort_by(k))
             anchor = "e" if key in ("duration", "size", "bitrate", "fps", "progress") \
                 else "w"
-            self.tree.column(key, width=width, minwidth=48, anchor=anchor,
+            self.tree.column(key, width=width, minwidth=40, anchor=anchor,
                              stretch=(key in ("name", "message")))
         for status, color in theme.STATUS_COLORS.items():
             self.tree.tag_configure(status, foreground=color)
@@ -160,13 +186,52 @@ class FileQueuePanel(ttk.Frame):
 
     def _build_footer(self) -> None:
         footer = ttk.Frame(self, style="Toolbar.TFrame", padding=(10, 6))
-        footer.pack(fill="x", pady=(8, 0))
-        self.lbl_totals = ttk.Label(footer, text="", style="StatusAccent.TLabel")
-        self.lbl_totals.pack(side="left")
-        self.lbl_session = ttk.Label(footer, text="", style="Status.TLabel")
-        self.lbl_session.pack(side="left", padx=10)
+        footer.pack(fill="x", pady=(6, 0))
         self.lbl_visible = ttk.Label(footer, text="", style="Status.TLabel")
         self.lbl_visible.pack(side="right")
+        self.lbl_session = ttk.Label(footer, text="", style="Status.TLabel")
+        self.lbl_session.pack(side="left", padx=(10, 0))
+        self.lbl_totals = ttk.Label(footer, text="", style="StatusAccent.TLabel")
+        self.lbl_totals.pack(side="left")
+
+    # ------------------------------------------------------------------
+    # Adaptação ao tamanho
+    # ------------------------------------------------------------------
+    def _on_resize(self, event) -> None:
+        """Esconde colunas opcionais e compacta a barra em janelas estreitas."""
+        width = event.width
+        compact = width < 1180
+        if compact != self._compact:
+            self._compact = compact
+            if compact:
+                self._btn_clear.pack_forget()
+            else:
+                self._btn_clear.pack(side="left", padx=(0, 4))
+            self._apply_columns(width)
+        else:
+            self._apply_columns(width)
+
+    def _apply_columns(self, width: int) -> None:
+        # esconde da última para a primeira até o nome ter espaço confortável
+        hidden: list[str] = []
+        budget = width
+        total = sum(c[2] for c in COLUMNS)
+        for key in reversed(OPTIONAL_COLUMNS):
+            if budget >= 760 and total <= width - 20:
+                break
+            hidden.append(key)
+            total -= next(c[2] for c in COLUMNS if c[0] == key)
+        if tuple(hidden) == self._hidden_columns:
+            return
+        self._hidden_columns = tuple(hidden)
+        visible = [c[0] for c in COLUMNS if c[0] not in hidden]
+        self.tree.configure(displaycolumns=visible)
+        # distribui o espaço extra entre nome e detalhes
+        extra = max(0, width - 30 - total)
+        name_width = next(c[2] for c in COLUMNS if c[0] == "name") + extra // 2
+        msg_width = next(c[2] for c in COLUMNS if c[0] == "message") + extra // 2
+        self.tree.column("name", width=max(160, name_width))
+        self.tree.column("message", width=max(120, msg_width))
 
     # ------------------------------------------------------------------
     # Dados
@@ -206,7 +271,6 @@ class FileQueuePanel(ttk.Frame):
         if self._search:
             haystack = f"{job.file} {job.message} {job.config.container}".lower()
             if self._search not in haystack:
-                # raciocina sobre todo o conjunto, não apenas sobre a janela visível
                 matching = getattr(self, "_search_ids", None)
                 if matching is None:
                     matching = {other.id for other in self.app.queue.snapshot()
@@ -307,7 +371,6 @@ class FileQueuePanel(ttk.Frame):
             anchor_index = self._visible_ids.index(top_job_id)
         else:
             anchor_index = getattr(self, "_window_start", 0)
-        # o primeiro item carregado fica onde o usuário está vendo agora
         if total > block and children:
             try:
                 fraction = self.tree.yview()[0]
@@ -347,7 +410,6 @@ class FileQueuePanel(ttk.Frame):
             self._gap_ids.discard(iid)
 
         self._rebuild_gaps(target)
-        # atualiza/insere os itens reais
         for index in range(start, end):
             job_id = self._visible_ids[index]
             job = self.app.queue.job(job_id)
@@ -377,7 +439,6 @@ class FileQueuePanel(ttk.Frame):
             if gap_parent in self.tree.get_children():
                 self.tree.delete(gap_parent)
             parent = self.tree.insert("", line - 1, iid=gap_parent, tags=("gap",))
-            # uma linha aninhada por linha vazia (sem exibir texto)
             for _ in range(count):
                 self.tree.insert(parent, "end", text="", tags=("gap",))
             self._gap_ids.add(gap_parent)
