@@ -141,6 +141,9 @@ def parse_bitrate(value) -> str | None:
         return None
     if number <= 0:
         return None
+    if multiplier == 1:
+        # um número puro é interpretado em kbps (padrão das interfaces)
+        return f"{int(round(number))}k"
     return f"{int(round(number * multiplier / 1000))}k"
 
 

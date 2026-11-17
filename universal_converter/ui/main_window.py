@@ -303,6 +303,10 @@ class MainWindow(tk.Tk):
         if source_root and not settings.get("source_root"):
             settings.set("source_root", source_root)
             self.performance_panel.load_from_settings()
+        elif len(files) == 1 and source_root:
+            # um único arquivo escolhido: não criar subpasta replicando a origem
+            settings.set("preserve_structure", False)
+            self.performance_panel.load_from_settings()
         output_dirs = {path: output_dir for path in files} if output_dir else {}
         added = self.app.add_files(files, output_dirs)
         if not added:
@@ -339,6 +343,10 @@ class MainWindow(tk.Tk):
         self.lbl_status.configure(text=f"Procurando arquivos em {folder}…")
         self.update_idletasks()
         result = scan_folder(folder, scan_options)
+        if not scan_options.recursive:
+            # sem subpastas não há hierarquia a preservar
+            self.app.settings.set("preserve_structure", False)
+            self.performance_panel.load_from_settings()
         self.lbl_status.configure(text=f"{len(result.files)} arquivo(s) encontrado(s).")
         if not result.files:
             dialogs.info(self, "Nenhum arquivo",

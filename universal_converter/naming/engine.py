@@ -257,7 +257,7 @@ class NamingEngine:
         root, dot, ext = base.rpartition(".")
         if not dot:
             root, ext = base, ""
-        counter = 1
+        counter = _next_suffix(root)
         while True:
             candidate_name = (f"{root} ({counter}).{ext}" if ext
                               else f"{root} ({counter})")
@@ -267,6 +267,12 @@ class NamingEngine:
                 taken.add(ckey)
                 return candidate, True
             counter += 1
+
+
+def _next_suffix(root: str) -> int:
+    """Continua a numeração de um nome tipo "Album (3) - Faixa"."""
+    match = re.search(r"\((\d+)\)", root)
+    return int(match.group(1)) + 1 if match else 1
 
 
 def _clean_spaces(text: str) -> str:
