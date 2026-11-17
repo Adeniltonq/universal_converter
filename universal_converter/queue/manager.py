@@ -226,6 +226,7 @@ class QueueManager:
 
     def reset_jobs(self, job_ids: Iterable[int]) -> None:
         with self._lock:
+            reset = 0
             for job_id in job_ids:
                 job = self._jobs_by_id.get(job_id)
                 if job and job.status in ("done", "error", "cancelled", "skipped"):
@@ -233,9 +234,10 @@ class QueueManager:
                     job.progress = 0.0
                     job.message = ""
                     job.output_path = ""
+                    reset += 1
                     self.store.update(job, fields=["status", "progress", "message",
                                                    "output_path"])
-        self._emit("jobs_reset", ids=list(job_ids))
+        self._emit("jobs_reset", ids=list(job_ids), count=reset)
 
     def retry_errors(self) -> None:
         ids = [job.id for job in self.snapshot() if job.status in ("error", "cancelled")]
@@ -320,11 +322,21 @@ class QueueManager:
     # Pré-visualização de nomes
     # ------------------------------------------------------------------
     def plan_paths(self, jobs: Iterable[ConversionJob] | None = None,
-                   limit: int | None = None) -> list[tuple[ConversionJob, str, str]]:
-        """Calcula (job, caminho_final, aviso) sem tocar no disco de saída."""
+                   limit: int | None = None,
+                   infos: dict[int, MediaInfo] | None = None
+                   ) -> list[tuple[ConversionJob, str, str]]:
+        """Calcula (job, caminho_final, aviso).
+
+        `infos` permite reaproveitar análises já feitas (ex.: pré-visualização na
+        interface); caso contrário usa o cache limitado do analisador.
+        """
         with self._lock:
             jobs = list(jobs) if jobs is not None else list(self.jobs)
         settings = self.settings
+        if jobs and not settings.output_dir and not settings.source_root and \
+                settings.output_mode == "folder":
+            latest = ConversionJob.from_dict(max(jobs, key=lambda j: j.created).to_dict())
+            settings = self._settings_from_jobs(jobs, latest)
         resolver = OutputResolver(OutputPolicy(
             mode=settings.output_mode, folder=settings.output_dir,
             source_root=settings.source_root,
@@ -337,15 +349,16 @@ class QueueManager:
         for index, job in enumerate(jobs, start=1):
             if limit and len(results) >= limit:
                 break
-            info = self.analyzer.analyze(job.file)
+            info = (infos or {}).get(job.id) or self.analyzer.analyze(job.file)
             warning = ""
             if not info.analyzed:
                 warning = info.error or "Não foi possível analisar o arquivo."
             container_key = builder.effective_container(job.config, info)
             extension = builder.output_extension(container_key, job.config.kind)
-            if job.config.container == "copy":
+            if job.config.container == "copy" and job.config.kind == "audio":
                 config = ConversionConfig.from_dict(job.config.to_dict())
                 config.audio.codec = "copy"
+                extension = builder.output_extension(container_key, "audio")
             else:
                 config = job.config
             context = NamingContext(
@@ -367,8 +380,6 @@ class QueueManager:
                 warning = warning or "O destino substituiria o original; renomeado."
             key = os.path.normcase(os.path.normpath(final_path))
             if key in taken:
-                adjusted, collision = NamingEngine.deduplicate(
-                    relative, set(), lambda rel: False)
                 base, ext = os.path.splitext(relative)
                 counter = 2
                 while key in taken:
@@ -381,6 +392,21 @@ class QueueManager:
             taken.add(key)
             results.append((job, final_path, warning))
         return results
+
+    @staticmethod
+    def _settings_from_jobs(jobs: list[ConversionJob],
+                            latest: ConversionJob) -> BatchSettings:
+        """Configurações coerentes para pré-visualizar arquivos com configs distintas.
+
+        Usa o modelo de nomes e o destino da tarefa mais recente; cada tarefa
+        mantém sua própria configuração de conversão.
+        """
+        return BatchSettings(
+            output_mode="beside" if not (latest.output_dir) else "folder",
+            output_dir=latest.output_dir,
+            source_root=os.path.dirname(os.path.dirname(latest.file)),
+            preserve_structure=True,
+            overwrite=False)
 
     # ------------------------------------------------------------------
     # Execução em lote
@@ -409,7 +435,11 @@ class QueueManager:
             else:
                 targets = [job for job in self.jobs if job.status == "pending"]
             if not targets:
-                self._emit("error", message="Nenhuma tarefa pendente para converter.")
+                message = ("Nenhuma tarefa pendente para converter." if not
+                           any(job.status == "done" for job in self.jobs) else
+                           "Os arquivos já foram convertidos. Use \"Repetir / "
+                           "recolocar na fila\" para converter novamente.")
+                self._emit("error", message=message)
                 return False
             for job in targets:
                 job.status = "pending"

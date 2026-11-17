@@ -168,6 +168,14 @@ class FFmpegInfo:
                                                  "hevc_videotoolbox"})
         return False
 
+    def version_line(self) -> str:
+        """Linha curta: "FFmpeg 7.1" ou mensagem de erro."""
+        if self.error:
+            return "FFmpeg não encontrado"
+        if not self.version:
+            return "FFmpeg (versão desconhecida)"
+        return f"FFmpeg {self.version.split('-')[0]}"
+
     def summary(self) -> str:
         if self.error:
             return self.error

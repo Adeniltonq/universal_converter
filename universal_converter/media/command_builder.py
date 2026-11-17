@@ -262,6 +262,8 @@ class CommandBuilder:
                             if not has_audio else
                             "Nenhum stream seria produzido — verifique as seleções.")
             return result
+        if not want_audio and config.kind == "audio":
+            result.warnings.append("O arquivo não tem áudio; só o vídeo será processado.")
 
         # decodificação por hardware (opcional)
         input_index = 0
@@ -367,6 +369,8 @@ class CommandBuilder:
         if container.muxer:
             args += ["-f", container.muxer]
         args += ["-threads", str(self.threads_per_job)]
+        # `output_path` é o caminho final; o executor troca por um temporário
+        # na mesma pasta e só renomeia após sucesso (integridade da saída).
         args += [output_path]
 
         result.args = args
