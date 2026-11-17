@@ -155,18 +155,55 @@ class FFmpegInfo:
         return {n for n, t in self.encoders.items() if t == "V"}
 
     def has_hwaccel(self, kind: str) -> bool:
-        if kind == "nvenc":
-            return "cuda" in self.hwaccels and bool(self.video_encoders() & {"h264_nvenc",
-                                                                           "hevc_nvenc",
-                                                                           "av1_nvenc"})
-        if kind == "qsv":
-            return "qsv" in self.hwaccels
-        if kind == "amf":
-            return "amf" in self.hwaccels
+        """Detecta aceleradores *funcionais* (não basta o FFmpeg listá-los).
+
+        Drivers podem estar presentes mas sem GPU/permissão acessível, então
+        executamos um teste curto e guardamos o resultado.
+        """
         if kind == "videotoolbox":
             return bool(self.video_encoders() & {"h264_videotoolbox",
                                                  "hevc_videotoolbox"})
-        return False
+        cache = self.__dict__.setdefault("_hw_probe", {})
+        if kind in cache:
+            return cache[kind]
+        encoders = {"nvenc": ("h264_nvenc", "cuda"),
+                    "qsv": ("h264_qsv", "qsv"),
+                    "amf": ("h264_amf", "amf")}.get(kind)
+        if not encoders:
+            return False
+        encoder, accel = encoders
+        ok = (encoder in self.encoders and accel in self.hwaccels
+              and self._probe_hw_encoder(encoder))
+        cache[kind] = ok
+        return ok
+
+    def _probe_hw_encoder(self, encoder: str) -> bool:
+        """Testa de fato a inicialização do encoder de hardware."""
+        if not self.ffmpeg:
+            return False
+        args = [self.ffmpeg, "-hide_banner", "-nostdin", "-loglevel", "error",
+                "-f", "lavfi", "-i", "color=c=black:s=256x144:r=25:d=0.2",
+                "-frames:v", "2", "-c:v", encoder, "-f", "null", "-"]
+        try:
+            result = subprocess.run(args, capture_output=True, timeout=8,
+                                    stdin=subprocess.DEVNULL,
+                                    creationflags=_NO_WINDOW)
+            return result.returncode == 0
+        except (OSError, subprocess.SubprocessError):
+            return False
+
+    def hw_encoders_ok(self) -> set[str]:
+        """Encoders de hardware listados **e** funcionais nesta máquina."""
+        result = set()
+        families = {"nvenc": ("h264_nvenc", "hevc_nvenc", "av1_nvenc"),
+                    "qsv": ("h264_qsv", "hevc_qsv", "av1_qsv"),
+                    "amf": ("h264_amf", "hevc_amf", "av1_amf")}
+        for kind, encoders in families.items():
+            if self.has_hwaccel(kind):
+                result.update(e for e in encoders if e in self.encoders)
+        result.update(e for e in ("h264_videotoolbox", "hevc_videotoolbox")
+                      if e in self.encoders)
+        return result
 
     def version_line(self) -> str:
         """Linha curta: "FFmpeg 7.1" ou mensagem de erro."""
@@ -185,7 +222,7 @@ class FFmpegInfo:
                 f"ffmpeg: {self.ffmpeg}\nffprobe: {self.ffprobe}\n"
                 f"Encoders: {len(self.audio_encoders())} de áudio, "
                 f"{len(self.video_encoders())} de vídeo\n"
-                f"Aceleração por hardware: {hw}")
+                f"Aceleração por hardware (testada): {hw}")
 
     def licensing_note(self) -> str:
         cfg = self.configuration
@@ -273,15 +310,15 @@ def find_tools(custom: str | None = None) -> tuple[str | None, str | None]:
 
 
 def hw_decoder_args(codec: str, info: FFmpegInfo) -> list[str]:
-    """Argumentos de decodificação por hardware, quando disponíveis."""
-    mapping = {"h264": ("h264_cuvid", "cuda"), "hevc": ("hevc_cuvid", "cuda"),
-               "av1": ("av1_cuvid", "cuda"), "vp9": ("vp9_cuvid", "cuda")}
+    """Argumentos de decodificação por hardware, quando disponíveis e testados."""
+    mapping = {"h264": ("h264_cuvid", "nvenc"), "hevc": ("hevc_cuvid", "nvenc"),
+               "av1": ("av1_cuvid", "nvenc"), "vp9": ("vp9_cuvid", "nvenc")}
     entry = mapping.get(codec)
     if not entry:
         return []
-    decoder, accel = entry
-    if decoder in info.decoders and accel in info.hwaccels:
-        return ["-hwaccel", accel, "-hwaccel_output_format", "cuda"]
+    decoder, kind = entry
+    if decoder in info.decoders and info.has_hwaccel(kind):
+        return ["-hwaccel", "cuda"]
     return []
 
 

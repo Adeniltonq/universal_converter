@@ -33,6 +33,13 @@ class VideoOption:
     is_copy: bool = False
 
 
+HW_ENCODER_IDS = {"h264_nvenc", "hevc_nvenc", "av1_nvenc", "h264_qsv", "hevc_qsv",
+                  "av1_qsv", "h264_amf", "hevc_amf", "av1_amf", "h264_videotoolbox",
+                  "hevc_videotoolbox", "h264_vaapi", "hevc_vaapi", "av1_vaapi",
+                  "vp9_vaapi", "mpeg2_vaapi", "h264_v4l2m2m", "h263_v4l2m2m",
+                  "h264_vulkan", "hevc_vulkan", "av1_vulkan", "mjpeg_qsv",
+                  "mjpeg_vaapi", "vp8_vaapi", "vp9_qsv"}
+
 _FALLBACK_VIDEO = (
     ("ffv1", "FFV1 (sem perdas)", None),
     ("utvideo", "Ut Video (sem perdas)", None),
@@ -114,7 +121,20 @@ class CodecCatalog:
         return self.ff.audio_encoders()
 
     def video_encoders(self) -> set[str]:
-        return self.ff.video_encoders()
+        """Encoders de vídeo oferecíveis: CPU sempre; hardware só se testado OK."""
+        encoders = self.ff.video_encoders()
+        hw_ok = self.ff.hw_encoders_ok()
+        result = set()
+        for name in encoders:
+            info = VIDEO_CODECS.get(name)
+            if info is not None and info.hwaccel:
+                if name in hw_ok:
+                    result.add(name)
+                continue
+            if name in HW_ENCODER_IDS and name not in hw_ok:
+                continue
+            result.add(name)
+        return result
 
     def extra_video_encoders(self) -> list[str]:
         """Encoders de vídeo "extras" presentes no FFmpeg mas fora do catálogo.
@@ -293,4 +313,4 @@ class CodecCatalog:
         info = VIDEO_CODECS.get(codec_id)
         if not info or not info.hwaccel:
             return False
-        return codec_id in self.ff.encoders and self.ff.has_hwaccel(info.hwaccel)
+        return codec_id in self.video_encoders()
