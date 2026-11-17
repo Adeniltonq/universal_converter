@@ -206,7 +206,16 @@ class FileQueuePanel(ttk.Frame):
         if self._search:
             haystack = f"{job.file} {job.message} {job.config.container}".lower()
             if self._search not in haystack:
-                return False
+                # raciocina sobre todo o conjunto, não apenas sobre a janela visível
+                matching = getattr(self, "_search_ids", None)
+                if matching is None:
+                    matching = {other.id for other in self.app.queue.snapshot()
+                                if self._search in f"{other.file} {other.message} "
+                                                  f"{other.config.container}".lower()}
+                    self._search_ids = matching
+                    self.after(1500, lambda: setattr(self, "_search_ids", None))
+                if job.id not in matching:
+                    return False
         return True
 
     def _sort_key(self, job):
@@ -279,11 +288,13 @@ class FileQueuePanel(ttk.Frame):
     def _gap_height(self) -> int:
         return theme.row_height(self)
 
+    def _visible_count(self) -> int:
+        height = max(120, self.tree.winfo_height())
+        return int(height / self._gap_height()) + 6
+
     def _virtualize(self) -> None:
         total = len(self._visible_ids)
-        height = max(120, self.tree.winfo_height())
-        row_height = self._gap_height()
-        visible_rows = int(height / row_height) + 6
+        visible_rows = self._visible_count()
         block = max(2000, visible_rows * 3)
 
         children = self.tree.get_children()
@@ -293,22 +304,24 @@ class FileQueuePanel(ttk.Frame):
                 top_job_id = self._iid_job[iid]
                 break
         if top_job_id is not None:
-            try:
-                top_index = self._visible_ids.index(top_job_id)
-            except ValueError:
-                top_index = 0
+            anchor_index = self._visible_ids.index(top_job_id)
         else:
-            top_index = getattr(self, "_window_start", 0)
+            anchor_index = getattr(self, "_window_start", 0)
+        # o primeiro item carregado fica onde o usuário está vendo agora
+        if total > block and children:
+            try:
+                fraction = self.tree.yview()[0]
+                top_row = int(fraction * (total + visible_rows))
+            except tk.TclError:
+                top_row = anchor_index
+        else:
+            top_row = anchor_index
 
         if total <= block:
             start, end = 0, total
         else:
-            start = max(0, min(total - block, top_index - visible_rows))
+            start = max(0, min(total - block, top_row - visible_rows // 2))
             end = min(total, start + block)
-        if total <= block and children and top_job_id is not None:
-            # já temos todas as linhas
-            start = 0
-            end = total
 
         before = start
         after = total - end
@@ -333,8 +346,8 @@ class FileQueuePanel(ttk.Frame):
             self._iid_job.pop(iid, None)
             self._gap_ids.discard(iid)
 
+        self._rebuild_gaps(target)
         # atualiza/insere os itens reais
-        start_line = 0
         for index in range(start, end):
             job_id = self._visible_ids[index]
             job = self.app.queue.job(job_id)
@@ -349,7 +362,6 @@ class FileQueuePanel(ttk.Frame):
                 self.tree.insert("", "end", iid=iid)
                 self.tree.item(iid, values=values, tags=tags)
             self._iid_job[iid] = job_id
-        self._rebuild_gaps(target)
         self._window_start = start
 
     def _rebuild_gaps(self, target: dict[str, tuple[int, int]]) -> None:

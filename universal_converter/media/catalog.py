@@ -41,7 +41,7 @@ _FALLBACK_VIDEO = (
     ("mjpeg", "MJPEG", None),
     ("theora", "Theora", None),
     ("flv1", "Sorenson H.263", None),
-    ("wmv1", "WMV1", None),
+    ("wmv1", "WMV1 (sem perdas/antigo)", None),
 )
 
 

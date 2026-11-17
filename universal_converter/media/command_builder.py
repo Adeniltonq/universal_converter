@@ -265,28 +265,49 @@ class CommandBuilder:
         if not want_audio and config.kind == "audio":
             result.warnings.append("O arquivo não tem áudio; só o vídeo será processado.")
 
-        # decodificação por hardware (opcional)
-        input_index = 0
-        hw = []
+        # ---------------- entradas ------------------------------------
+        # O muxer ipod exige a entrada principal como entrada 0 (`0:a`).
+        # Para ele a capa vem depois do arquivo.
+        cover_first = bool(container.muxer != "ipod")
+        cover_path = ""
+        if want_audio and config.audio.cover_copy and info.cover_streams and \
+                self.catalog.supports_cover(container_key) and not want_video:
+            cover_path = self._extract_cover(job_file, info)
+
+        hw: list[str] = []
         if want_video and config.video.hw_decode and info.main_video:
             from .ffmpeg import hw_decoder_args
             hw = hw_decoder_args(info.main_video.codec, ff)
+
+        media_pos = 0
+        cover_pos = -1
+        if cover_path and cover_first:
+            args += ["-i", cover_path]
+            cover_pos = media_pos
+            media_pos += 1
         args += hw
         args += ["-i", job_file]
-        next_input = 1
+        if cover_path and not cover_first:
+            args += ["-i", cover_path]
+            cover_pos = media_pos + 1
 
         # ---------------- áudio ---------------------------------------
         if want_audio:
-            spec = self._audio_map_spec(config, info)
+            spec = self._audio_map_spec(config, info, media_pos)
             args += ["-map", spec]
             if config.audio.codec == CODEC_COPY:
                 args += ["-c:a", "copy"]
             else:
+                input_codec = _input_audio_codec(info)
                 allowed = {o.id for o in self.catalog.audio_options(container_key,
-                                                                    _input_audio_codec(info))}
+                                                                    input_codec)}
                 if config.audio.codec not in allowed:
+                    if config.audio.codec == CODEC_COPY:
+                        result.error = (f"O contêiner \"{container.label}\" não aceita "
+                                        f"cópia do áudio {input_codec}.")
+                        return result
                     replacement = self._compatible_audio(config.audio.codec, container_key,
-                                                         _input_audio_codec(info))
+                                                         input_codec)
                     if replacement is None:
                         result.error = (f"O contêiner \"{container.label}\" não aceita "
                                         f"o codec de áudio {config.audio.codec} nesta "
@@ -305,7 +326,7 @@ class CommandBuilder:
 
         # ---------------- vídeo ---------------------------------------
         if want_video:
-            args += ["-map", "0:v:0"]
+            args += ["-map", f"{media_pos}:v:0"]
             if config.video.codec == CODEC_COPY:
                 args += ["-c:v", "copy"]
             elif config.video.codec == CODEC_NONE:
@@ -323,7 +344,7 @@ class CommandBuilder:
                         f"Codec de vídeo ajustado para {replacement} "
                         f"(incompatível com {container.label}).")
                     config.video.codec = replacement
-                if config.video.hw_decode and info.main_video and hw:
+                if hw:
                     args += ["-noautoscale"]
                 video_args, video_warnings, filters = self._video_args(config, info)
                 result.warnings.extend(video_warnings)
@@ -334,10 +355,21 @@ class CommandBuilder:
                 if filters:
                     args += ["-vf", ",".join(filters)]
             if config.kind in ("video", "both") and config.subtitles == "copy" and \
-                    info.subtitle_streams and container.kind in ("video", "both"):
-                if container_key in ("mkv", "mp4", "mov", "ts"):
-                    subtitle_codec = "mov_text" if container_key in ("mp4", "mov") else "copy"
-                    args += ["-map", "0:s?", "-c:s", subtitle_codec]
+                    info.subtitle_streams and container_key in ("mkv", "mp4", "mov", "ts"):
+                subtitle_codec = "mov_text" if container_key in ("mp4", "mov") else "copy"
+                args += ["-map", f"{media_pos}:s?", "-c:s", subtitle_codec]
+
+        # ---------------- capa embutida -------------------------------
+        if cover_path:
+            args += ["-map", f"{cover_pos}:v", "-c:v", "copy",
+                     "-disposition:v", "attached_pic"]
+            if container.id3:
+                args += ["-metadata:s:v", "title=Album cover",
+                         "-metadata:s:v", "comment=Cover (front)"]
+            elif container.muxer == "ipod":
+                # o muxer ipod gera a capa a partir do stream anexado;
+                # não copiar também a capa original evita duplicação
+                args += ["-map", f"-{media_pos}:v"]
 
         # ---------------- metadados e capítulos -----------------------
         if want_audio and config.audio.copy_metadata:
@@ -346,19 +378,6 @@ class CommandBuilder:
                 args += ["-map_chapters", "0"]
         else:
             args += ["-map_metadata", "-1", "-map_chapters", "-1"]
-
-        # ---------------- capa embutida -------------------------------
-        cover_path = ""
-        if want_audio and config.audio.cover_copy and info.cover_streams and \
-                self.catalog.supports_cover(container_key) and not want_video:
-            cover_path = self._extract_cover(job_file, info)
-            if cover_path:
-                args += ["-i", cover_path, "-map", f"{next_input}:v",
-                         "-c:v", "copy", "-disposition:v", "attached_pic"]
-                next_input += 1
-                if container.id3:
-                    args += ["-metadata:s:v", "title=Album cover",
-                             "-metadata:s:v", "comment=Cover (front)"]
 
         # ---------------- opções finais do contêiner ------------------
         if container_key == "mp3":
@@ -378,18 +397,23 @@ class CommandBuilder:
 
     # -- seleção de streams --------------------------------------------
     @staticmethod
-    def _audio_map_spec(config: ConversionConfig, info: MediaInfo) -> str:
+    def _audio_map_spec(config: ConversionConfig, info: MediaInfo,
+                        input_pos: int = 0) -> str:
+        """Especificação `-map` do áudio, relativa ao arquivo de origem."""
+        def spec(rest: str) -> str:
+            return f"{input_pos}:{rest}" if input_pos is not None else f"0:{rest}"
+
+        target = info.main_audio
+        default = spec(f"{target.index}") if target else spec("a:0")
         selector = config.audio.stream
         if selector == "all":
-            return "0:a"
+            return spec("a")
         if selector in ("", "auto", None):
-            stream = info.main_audio
-            return f"0:{stream.index}" if stream else "0:a:0"
+            return default
         index = to_int(selector)
         if index is None:
-            stream = info.main_audio
-            return f"0:{stream.index}" if stream else "0:a:0"
-        return f"0:{index}"
+            return default
+        return spec(str(index))
 
     # -- áudio ----------------------------------------------------------
     def _compatible_audio(self, codec_id: str, container_key: str,
