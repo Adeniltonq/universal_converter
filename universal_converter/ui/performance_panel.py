@@ -189,6 +189,10 @@ class PerformancePanel(ttk.Frame):
             self.var_source.set(folder)
             self._on_change()
 
+    def update_plan(self) -> None:
+        """Recalcula o exemplo (usado quando a fila muda)."""
+        self._update_math()
+
     def _on_mode_change(self) -> None:
         state = "normal" if self.var_mode.get() == "folder" else "disabled"
         try:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import threading
 import tkinter as tk
 from tkinter import ttk
 
@@ -150,10 +151,22 @@ class MainWindow(tk.Tk):
         self.app.queue.load()
         cached = self.app.queue.load_cached_infos()
         self.files_panel.refresh(force=True)
+        self._load_queue_metadata()
         if self.app.queue.jobs:
             self.notify(f"{len(self.app.queue.jobs)} tarefa(s) restaurada(s) da sessão "
                         f"anterior" + (f" ({cached} com análise em cache)."
                                        if cached else "."))
+
+    def _load_queue_metadata(self) -> None:
+        """Pede ao FFprobe (em segundo plano) os dados que faltam na tabela."""
+        jobs = [job for job in self.app.queue.jobs if not job.duration]
+        if not jobs:
+            return
+
+        def worker() -> None:
+            self.app.analyzer.analyze_streams([job.file for job in jobs], workers=4)
+
+        threading.Thread(target=worker, daemon=True, name="queue-metadata").start()
 
     def _initial_checks(self) -> None:
         if self.app.ff.error:

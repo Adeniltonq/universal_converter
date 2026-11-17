@@ -12,7 +12,7 @@ import time
 from typing import Iterable
 
 from ..core.settings import Settings
-from ..media.analyzer import MediaAnalyzer
+from ..media.analyzer import QUICK_ANALYSIS_LIMIT, MediaAnalyzer
 from ..media.catalog import CodecCatalog
 from ..media.command_builder import CommandBuilder
 from ..media.ffmpeg import FFmpegInfo
@@ -197,6 +197,13 @@ class AppController:
                 continue
             key = self.analyzer._cache_key(job.file)
             if key in self.analyzer._cache:
+                continue
+            try:
+                size = os.path.getsize(job.file)
+            except OSError:
+                size = 0
+            if size <= QUICK_ANALYSIS_LIMIT:
+                # pré-visualização basta com os metadados do cabeçalho
                 continue
             pending.append(job_id)
         if pending:

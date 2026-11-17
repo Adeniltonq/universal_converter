@@ -312,24 +312,41 @@ class QueueManager:
         with self._lock:
             ids = list(job_ids) if job_ids is not None else [j.id for j in self.jobs]
             jobs = [self._jobs_by_id[i] for i in ids if i in self._jobs_by_id]
-        pending = [job for job in jobs if not self.analyzer.analyze(job.file).analyzed]
         self._analysis_cancel = threading.Event()
+        cancelled = self._analysis_cancel
+        total = len(jobs)
+        if not total:
+            self._emit("analysis_done", total=0)
+            return
 
         def worker() -> None:
-            cancelled = self._analysis_cancel
-            for done, job in enumerate(pending, start=1):
-                if cancelled.is_set():
-                    return
-                info = self.analyzer.analyze(job.file)
-                with self._lock:
-                    job.duration = info.duration
-                    if info.size:
-                        job.size = info.size
-                    self.store.update(job, fields=["duration", "size"])
-                self._emit("job_analyzed", job=job, info=info)
-                if done % 25 == 0 or done == len(pending):
-                    self._emit("analysis_progress", done=done, total=len(pending))
-            self._emit("analysis_done", total=len(pending))
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+            done = 0
+            # cada FFprobe custa ~100-130 ms; poucos em paralelo saturam a E/S
+            images = min(8, max(2, (os.cpu_count() or 4)))
+            with ThreadPoolExecutor(max_workers=images,
+                                    thread_name_prefix="analyze") as pool:
+                futures = {pool.submit(self.analyzer.analyze, job.file): job
+                           for job in jobs}
+                for future in as_completed(futures):
+                    job = futures[future]
+                    if cancelled.is_set():
+                        break
+                    try:
+                        info = future.result()
+                    except Exception:  # noqa: BLE001
+                        info = None
+                    done += 1
+                    if info is not None:
+                        with self._lock:
+                            job.duration = info.duration
+                            if info.size:
+                                job.size = info.size
+                            self.store.update(job, fields=["duration", "size"])
+                        self._emit("job_analyzed", job=job, info=info)
+                    if done % 25 == 0 or done == total:
+                        self._emit("analysis_progress", done=done, total=total)
+            self._emit("analysis_done", total=done)
 
         threading.Thread(target=worker, daemon=True, name="analyze-jobs").start()
 
@@ -383,7 +400,7 @@ class QueueManager:
         for index, job in enumerate(jobs, start=1):
             if limit and len(results) >= limit:
                 break
-            info = (infos or {}).get(job.id) or self.analyzer.analyze(job.file)
+            info = (infos or {}).get(job.id) or self.analyzer.quick_info(job.file)
             warning = ""
             if not info.analyzed:
                 warning = info.error or "Não foi possível analisar o arquivo."

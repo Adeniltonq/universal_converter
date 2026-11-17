@@ -260,6 +260,17 @@ class MediaIntegrationTests(unittest.TestCase):
         container = builder.effective_container(config, info)
         self.assertIn(container, ("adts", "m4a", "mka"))
 
+    def test_quick_info_reads_tags_without_probe(self):
+        path = self._make(["-f", "lavfi", "-i", "sine=frequency=500:duration=1",
+                           "-metadata", "title=Título Ä", "-metadata", "artist=Sepultura",
+                           "-metadata", "album=Roots", "-c:a", "libmp3lame",
+                           "-id3v2_version", "3"], "tags.mp3")
+        info = self.analyzer.quick_info(path)
+        self.assertEqual(info.tag("title"), "Título Ä")
+        self.assertEqual(info.tag("artist"), "Sepultura")
+        self.assertEqual(info.tag("album"), "Roots")
+        self.assertEqual(info.size, os.path.getsize(path))
+
     def test_convert_to_ogg(self):
         info = self.analyzer.analyze(self.mp3)
         from universal_converter.media.command_builder import CommandBuilder
